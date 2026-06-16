@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DeepSeek Chat</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            min-height: 100vh;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        .wrapper {
+            max-width: 700px;
+            margin: 0 auto;
+            padding: 40px 20px;
+        }
+        .header {
+            text-align: center;
+            color: #fff;
+            margin-bottom: 30px;
+        }
+        .header h1 { font-size: 2.5rem; margin-bottom: 6px; }
+        .header p { font-size: 1rem; opacity: 0.85; }
+
+        .chat-box {
+            background: #fff;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.25);
+            padding: 30px;
+        }
+        .input-row {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        .input-row input {
+            flex: 1;
+            padding: 14px 18px;
+            font-size: 1rem;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        .input-row input:focus { border-color: #667eea; }
+        .input-row button {
+            padding: 14px 28px;
+            font-size: 1rem;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #fff;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: opacity 0.15s;
+            white-space: nowrap;
+        }
+        .input-row button:hover { opacity: 0.9; }
+        .input-row button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        .response-area {
+            min-height: 120px;
+            background: #f8f9fb;
+            border-radius: 10px;
+            padding: 20px;
+            color: #333;
+            line-height: 1.7;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        .response-area.placeholder { color: #aaa; font-style: italic; }
+        .response-area.loading { color: #667eea; }
+    </style>
+</head>
+<body>
+<div class="wrapper">
+    <div class="header">
+        <h1>🤖 DeepSeek Chat</h1>
+        <p>输入问题，DeepSeek 回答</p>
+    </div>
+    <div class="chat-box">
+        <div class="input-row">
+            <input id="input" type="text" placeholder="输入你的问题..." autofocus>
+            <button id="btn" onclick="send()">发送</button>
+        </div>
+        <div id="response" class="response-area placeholder">等待你的提问…</div>
+    </div>
+</div>
+
+<script>
+const input = document.getElementById('input');
+const btn   = document.getElementById('btn');
+const resp  = document.getElementById('response');
+
+input.addEventListener('keydown', e => { if (e.key === 'Enter') send(); });
+
+async function send() {
+    const message = input.value.trim();
+    if (!message) return;
+
+    btn.disabled = true;
+    resp.className = 'response-area loading';
+    resp.textContent = '思考中…';
+
+    try {
+        const res = await fetch('/api/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message })
+        });
+        const data = await res.json();
+        if (data.error) {
+            resp.className = 'response-area';
+            resp.textContent = '❌ 错误: ' + data.error;
+        } else {
+            resp.className = 'response-area';
+            resp.textContent = data.reply;
+        }
+    } catch (err) {
+        resp.className = 'response-area';
+        resp.textContent = '❌ 请求失败: ' + err.message;
+    } finally {
+        btn.disabled = false;
+        input.focus();
+    }
+}
+</script>
+</body>
+</html>
