@@ -3,3 +3,7 @@ sie-vocab-bin/config.json
 
 # 编译产物
 sie-vocab-bin/server
+
+# Claude Code 配置
+.claude/
+CLAUDE.md
