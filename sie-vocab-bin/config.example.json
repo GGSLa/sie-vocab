@@ -1,4 +1,11 @@
 {
   "deepseek_api_key": "在这里填写你的 DeepSeek API Key",
-  "port": "8080"
+  "port": "8080",
+  "mysql": {
+    "host": "localhost",
+    "port": "3306",
+    "user": "sie_vocab",
+    "password": "填写数据库密码",
+    "database": "sie_vocab"
+  }
 }
