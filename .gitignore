@@ -7,3 +7,6 @@ sie-vocab-bin/server
 # Claude Code 配置
 .claude/
 CLAUDE.md
+
+# 大型教材 PDF（不上传 Git）
+*.pdf
