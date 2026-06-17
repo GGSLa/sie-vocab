@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>单词复习</title>
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <link rel="stylesheet" href="/css/style.css?v=10">
+</head>
+<body>
+<div class="wrapper">
+    <!-- 导航栏 -->
+    <nav class="nav-bar">
+        <a href="/" class="nav-link">🏠 首页</a>
+        <span class="nav-current">📝 复习</span>
+    </nav>
+
+    <div class="header">
+        <h1>📝 单词复习</h1>
+        <p>随机抽词，检验记忆</p>
+    </div>
+
+    <!-- 模式切换 -->
+    <div class="mode-toggle-bar">
+        <button id="btn-mode-daily" class="btn-mode active" onclick="switchMode('daily')">📅 每日模式</button>
+        <button id="btn-mode-free" class="btn-mode" onclick="switchMode('free')">🆓 自由模式</button>
+    </div>
+
+    <div class="review-box">
+        <!-- 加载中 -->
+        <div id="review-loading" class="review-loading">正在抽取单词…</div>
+
+        <!-- 单词显示区 -->
+        <div id="review-card" class="review-card" style="display:none;">
+            <div class="review-word-en" id="review-word-en"></div>
+            <button id="btn-expand" class="btn-expand" onclick="toggleExpand()">🔽 展开详情</button>
+            <div id="review-stats" class="review-stats" style="display:none;"></div>
+            <div id="review-detail" class="review-detail" style="display:none;"></div>
+        </div>
+
+        <!-- 操作栏 -->
+        <div class="review-actions" style="display:none;" id="review-actions">
+            <button class="btn-next" onclick="nextWord()">⏭ 下一个</button>
+        </div>
+    </div>
+</div>
+
+<script src="/js/review.js?v=10"></script>
+</body>
+</html>

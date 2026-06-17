@@ -34,9 +34,16 @@ func main() {
 	http.HandleFunc("/api/word/query", service.HandleWordQuery)
 	http.HandleFunc("/api/word/save", service.HandleWordSave)
 	http.HandleFunc("/api/word/save-all", service.HandleWordSaveAll)
+	http.HandleFunc("/api/review/random", service.HandleReviewRandom)
+	http.HandleFunc("/api/review/record", service.HandleReviewRecord)
+	http.HandleFunc("/api/review/free/random", service.HandleReviewFreeRandom)
+	http.HandleFunc("/api/review/free/record", service.HandleReviewFreeRecord)
 
-	// 静态文件
+	// 静态文件（禁用缓存）
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+		w.Header().Set("Pragma", "no-cache")
+		w.Header().Set("Expires", "0")
 		if r.URL.Path == "/" {
 			http.ServeFile(w, r, filepath.Join(staticDir, "index.html"))
 			return

@@ -166,6 +166,236 @@ func SaveWord(entry model.WordEntry) error {
 	return tx.Commit()
 }
 
+// ---------- 复习 ----------
+
+// nextReviewInterval 根据复习次数计算下次复习间隔（天）
+func nextReviewInterval(reviewCount int) int {
+	switch {
+	case reviewCount <= 1:
+		return 1
+	case reviewCount == 2:
+		return 2
+	case reviewCount == 3:
+		return 4
+	case reviewCount == 4:
+		return 7
+	case reviewCount == 5:
+		return 15
+	default:
+		return 30
+	}
+}
+
+// GetDueWordForReview 随机抽取一个到期的基础词族，从中随机选一个单词返回
+// 到期判断：next_review_date IS NULL（从未复习）或 <= 今日（已到复习日）
+// 同时排除今日已复习过的词族（保证一天一词族一次）
+// 每日上限 30 词
+func GetDueWordForReview() (*model.WordEntry, int, error) {
+	today := "DATE(DATE_SUB(NOW(), INTERVAL 4 HOUR))"
+
+	// 0. 检查今日复习数量是否已达上限
+	var todayCount int
+	DB.QueryRow(fmt.Sprintf("SELECT COUNT(*) FROM review_logs WHERE review_date = %s", today)).Scan(&todayCount)
+	if todayCount >= 30 {
+		return nil, 0, fmt.Errorf("今日复习已达上限（30词）")
+	}
+
+	// 1. 随机选一个到期且今日未被复习过的基础词族
+	var familyRoot string
+	query := fmt.Sprintf(`
+		SELECT word FROM words
+		WHERE type = '基础词'
+		  AND (next_review_date IS NULL OR next_review_date <= %s)
+		  AND word NOT IN (
+			SELECT DISTINCT COALESCE(w2.base_word, w2.word)
+			FROM review_logs rl
+			JOIN words w2 ON rl.word_id = w2.id
+			WHERE rl.review_date = %s
+		  )
+		ORDER BY RAND() LIMIT 1`, today, today)
+	err := DB.QueryRow(query).Scan(&familyRoot)
+	if err == sql.ErrNoRows {
+		return nil, 0, fmt.Errorf("所有单词均已排期，暂无到期复习的单词")
+	}
+	if err != nil {
+		return nil, 0, err
+	}
+
+	// 2. 从该词族中随机选一个到期且今日未复习的单词
+	var pickedWord string
+	var pickedID int
+	err = DB.QueryRow(
+		fmt.Sprintf(`SELECT id, word FROM words
+			WHERE (word = ? OR base_word = ?)
+			  AND (next_review_date IS NULL OR next_review_date <= %s)
+			  AND id NOT IN (
+			    SELECT word_id FROM review_logs WHERE review_date = %s
+			  )
+			ORDER BY RAND() LIMIT 1`, today, today),
+		familyRoot, familyRoot).Scan(&pickedID, &pickedWord)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	// 3. 获取完整数据
+	family, err := QueryWordFamily(pickedWord)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	for _, entry := range family {
+		if entry.Word == pickedWord {
+			return &entry, pickedID, nil
+		}
+	}
+
+	return nil, 0, fmt.Errorf("单词 %s 未在词族中找到", pickedWord)
+}
+
+// RecordReview 记录复习并更新间隔（每天每词只记一次，每日模式）
+func RecordReview(wordID int) (newCount int, nextDate string, err error) {
+	// 1. INSERT IGNORE 防止同日重复记录
+	result, err := DB.Exec(
+		"INSERT IGNORE INTO review_logs (word_id, review_date) VALUES (?, DATE(DATE_SUB(NOW(), INTERVAL 4 HOUR)))",
+		wordID)
+	if err != nil {
+		return 0, "", err
+	}
+
+	rowsAffected, _ := result.RowsAffected()
+	if rowsAffected == 0 {
+		// 今日已记录过，读取当前状态返回
+		var nd sql.NullString
+		err = DB.QueryRow("SELECT review_count, next_review_date FROM words WHERE id = ?", wordID).
+			Scan(&newCount, &nd)
+		if nd.Valid {
+			nextDate = nd.String
+		} else {
+			// 修复遗留数据：有 review_logs 但没有 next_review_date
+			DB.Exec(`UPDATE words SET next_review_date = DATE_ADD(DATE(DATE_SUB(NOW(), INTERVAL 4 HOUR)), INTERVAL 1 DAY), updated_at = NOW() WHERE id = ?`, wordID)
+			DB.QueryRow("SELECT next_review_date FROM words WHERE id = ?", wordID).Scan(&nd)
+			if nd.Valid {
+				nextDate = nd.String
+			}
+		}
+		return
+	}
+
+	// 2. 检查是否过期：next_review_date < 今天 → 重置计数（遗忘惩罚）
+	var currentCount int
+	var isOverdue bool
+	err = DB.QueryRow(fmt.Sprintf(
+		`SELECT review_count, next_review_date IS NOT NULL AND next_review_date < %s FROM words WHERE id = ?`,
+		"DATE(DATE_SUB(NOW(), INTERVAL 4 HOUR))"),
+		wordID).Scan(&currentCount, &isOverdue)
+	if err != nil {
+		return 0, "", err
+	}
+
+	newCount = currentCount + 1
+	interval := nextReviewInterval(newCount)
+	if isOverdue {
+		interval = 1 // 过期：计数不重置，仅间隔回到 1 天
+	}
+
+	// MySQL UPDATE + 回读 next_review_date（兼容 5.7 无 RETURNING）
+	_, err = DB.Exec(
+		`UPDATE words SET review_count = ?, next_review_date = DATE_ADD(DATE(DATE_SUB(NOW(), INTERVAL 4 HOUR)), INTERVAL ? DAY), updated_at = NOW()
+		 WHERE id = ?`,
+		newCount, interval, wordID)
+	if err != nil {
+		return 0, "", err
+	}
+
+	var nd sql.NullString
+	err = DB.QueryRow("SELECT next_review_date FROM words WHERE id = ?", wordID).Scan(&nd)
+	if err != nil {
+		return 0, "", err
+	}
+	if nd.Valid {
+		nextDate = nd.String
+	}
+
+	return newCount, nextDate, nil
+}
+
+// GetWordReviewStats 获取单词的复习统计（仅每日模式，自由模式不计入）
+// wordCount: 该单词本身被复习的次数（从 words.review_count 读取）
+// baseCount: 该单词所属词族的总复习次数（所有单词都有，衍生词取基础词的词族）
+// nextDate: 下次复习日期（NULL 时返回空字符串）
+func GetWordReviewStats(wordID int) (wordCount int, baseCount int, nextDate string, err error) {
+	// 1. 查询单词信息 + review_count + next_review_date
+	var word, wType string
+	var baseWord sql.NullString
+	var nextReview sql.NullString
+	err = DB.QueryRow("SELECT word, type, base_word, review_count, next_review_date FROM words WHERE id = ?", wordID).
+		Scan(&word, &wType, &baseWord, &wordCount, &nextReview)
+	if err != nil {
+		return 0, 0, "", err
+	}
+	if nextReview.Valid {
+		nextDate = nextReview.String
+	}
+
+	// 2. 词族总复习次数（衍生词追溯到基础词来计算）
+	familyRoot := word
+	if wType != "基础词" && baseWord.Valid && baseWord.String != "" {
+		familyRoot = baseWord.String
+	}
+	err = DB.QueryRow(`
+		SELECT COUNT(*) FROM review_logs rl
+		JOIN words w ON rl.word_id = w.id
+		WHERE w.word = ? OR w.base_word = ?
+	`, familyRoot, familyRoot).Scan(&baseCount)
+	if err != nil {
+		return wordCount, 0, nextDate, err
+	}
+
+	return wordCount, baseCount, nextDate, nil
+}
+
+// ---------- 自由复习 ----------
+
+// GetRandomWordForFreeReview 自由模式随机抽词（无每日约束）
+func GetRandomWordForFreeReview() (*model.WordEntry, int, error) {
+	var familyRoot string
+	err := DB.QueryRow("SELECT word FROM words WHERE type = '基础词' ORDER BY RAND() LIMIT 1").Scan(&familyRoot)
+	if err == sql.ErrNoRows {
+		return nil, 0, fmt.Errorf("数据库中没有单词")
+	}
+	if err != nil {
+		return nil, 0, err
+	}
+
+	var pickedWord string
+	var pickedID int
+	err = DB.QueryRow(
+		"SELECT id, word FROM words WHERE word = ? OR base_word = ? ORDER BY RAND() LIMIT 1",
+		familyRoot, familyRoot).Scan(&pickedID, &pickedWord)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	family, err := QueryWordFamily(pickedWord)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	for _, entry := range family {
+		if entry.Word == pickedWord {
+			return &entry, pickedID, nil
+		}
+	}
+
+	return nil, 0, fmt.Errorf("单词 %s 未在词族中找到", pickedWord)
+}
+
+// RecordFreeReview 记录自由复习
+func RecordFreeReview(wordID int) error {
+	_, err := DB.Exec("INSERT INTO free_review_logs (word_id) VALUES (?)", wordID)
+	return err
+}
+
 // SaveWords 批量保存单词
 func SaveWords(entries []model.WordEntry) (int, error) {
 	count := 0

@@ -123,6 +123,122 @@ func HandleWordSaveAll(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, model.SaveResult{Success: true, Count: count})
 }
 
+// ---------- 复习 ----------
+
+// HandleReviewRandom 随机抽取复习单词
+func HandleReviewRandom(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "只接受 POST 请求"})
+		return
+	}
+
+	entry, wordID, err := repo.GetDueWordForReview()
+	if err != nil {
+		log.Printf("❌ 随机抽取复习单词失败: %v", err)
+		allDone := err.Error() == "所有单词均已排期，暂无到期复习的单词" ||
+			err.Error() == "今日复习已达上限（30词）"
+		writeJSON(w, http.StatusOK, model.ReviewErrorResponse{
+			Error:   "抽取复习单词失败",
+			AllDone: allDone,
+		})
+		return
+	}
+
+	log.Printf("🎲 复习抽词: %s (id=%d)", entry.Word, wordID)
+	writeJSON(w, http.StatusOK, model.ReviewRandomResponse{
+		WordID: wordID,
+		Word:   *entry,
+	})
+}
+
+// HandleReviewRecord 记录复习
+func HandleReviewRecord(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "只接受 POST 请求"})
+		return
+	}
+
+	var req model.ReviewRecordRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.WordID <= 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "请求格式错误或 word_id 无效"})
+		return
+	}
+
+	_, nextDate, err := repo.RecordReview(req.WordID)
+	if err != nil {
+		log.Printf("❌ 记录复习失败: %v", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "记录复习失败"})
+		return
+	}
+
+	wCount, bCount, nd, _ := repo.GetWordReviewStats(req.WordID)
+	// 优先使用 RecordReview 返回的日期
+	if nextDate == "" {
+		nextDate = nd
+	}
+
+	log.Printf("📝 已记录复习: word_id=%d (词:%d 族:%d 下次:%s)", req.WordID, wCount, bCount, nextDate)
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success":          true,
+		"word_count":       wCount,
+		"base_count":       bCount,
+		"next_review_date": nextDate,
+	})
+}
+
+// ---------- 自由复习 ----------
+
+// HandleReviewFreeRandom 自由模式随机抽词
+func HandleReviewFreeRandom(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "只接受 POST 请求"})
+		return
+	}
+
+	entry, wordID, err := repo.GetRandomWordForFreeReview()
+	if err != nil {
+		log.Printf("❌ 自由复习抽词失败: %v", err)
+		writeJSON(w, http.StatusOK, model.ReviewErrorResponse{Error: "抽取复习单词失败"})
+		return
+	}
+
+	log.Printf("🎲 自由复习抽词: %s (id=%d)", entry.Word, wordID)
+	writeJSON(w, http.StatusOK, model.ReviewRandomResponse{
+		WordID: wordID,
+		Word:   *entry,
+	})
+}
+
+// HandleReviewFreeRecord 记录自由复习
+func HandleReviewFreeRecord(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "只接受 POST 请求"})
+		return
+	}
+
+	var req model.ReviewRecordRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.WordID <= 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "请求格式错误或 word_id 无效"})
+		return
+	}
+
+	if err := repo.RecordFreeReview(req.WordID); err != nil {
+		log.Printf("❌ 记录自由复习失败: %v", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "记录失败"})
+		return
+	}
+
+	wCount, bCount, nextDate, _ := repo.GetWordReviewStats(req.WordID)
+
+	log.Printf("📝 自由复习记录: word_id=%d（不计入统计，当前词:%d 族:%d 下次:%s）", req.WordID, wCount, bCount, nextDate)
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success":          true,
+		"word_count":       wCount,
+		"base_count":       bCount,
+		"next_review_date": nextDate,
+	})
+}
+
 // ---------- 工具 ----------
 
 func writeJSON(w http.ResponseWriter, status int, v interface{}) {

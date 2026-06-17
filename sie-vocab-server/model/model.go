@@ -109,6 +109,22 @@ type SaveResult struct {
 	Count   int  `json:"count,omitempty"`
 }
 
+// ---------- 复习 ----------
+
+type ReviewRandomResponse struct {
+	WordID int       `json:"word_id"`
+	Word   WordEntry `json:"word"`
+}
+
+type ReviewErrorResponse struct {
+	Error   string `json:"error"`
+	AllDone bool   `json:"all_done,omitempty"`
+}
+
+type ReviewRecordRequest struct {
+	WordID int `json:"word_id"`
+}
+
 // ---------- JSON 数据模型 ----------
 
 type WordEntry struct {
