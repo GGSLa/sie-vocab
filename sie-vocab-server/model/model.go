@@ -75,9 +75,11 @@ type MySQLConfig struct {
 }
 
 type Config struct {
-	DeepSeekAPIKey string      `json:"deepseek_api_key"`
-	Port           string      `json:"port"`
-	MySQL          MySQLConfig `json:"mysql"`
+	DeepSeekAPIKey   string      `json:"deepseek_api_key"`
+	Port             string      `json:"port"`
+	MySQL            MySQLConfig `json:"mysql"`
+	SIE_PDFPath      string      `json:"sie_pdf_path"`
+	SIE_ProgressPath string      `json:"sie_progress_path"`
 }
 
 // ---------- 请求/响应 ----------
@@ -140,6 +142,101 @@ type WordEntry struct {
 type Meaning struct {
 	Domain string `json:"domain"`
 	Text   string `json:"text"`
+}
+
+// ---------- 阅读器 ----------
+
+const ReaderSystemPrompt = `你是一个 SIE（Securities Industry Essentials）考试教材的阅读辅助助手。你的任务是为英语学习者处理教材文本。
+
+对于给定的文本，你需要：
+1. 保留原始英文文本
+2. 提供准确的中文翻译
+3. 提取重要的词汇（尤其是金融/证券专业术语），包括单词、词性和中文释义
+4. 标注值得注意的语法点或句式结构
+
+## JSON Schema（必须严格遵守）
+
+{
+  "page_label": "51",
+  "section": "Chapter 5: Securities Underwriting",
+  "chunks": [
+    {
+      "en": "All issuers of securities need a starting point...",
+      "zh": "所有证券发行人需要一个起点...",
+      "vocab": [
+        {
+          "word": "underwriting",
+          "pos": "n.",
+          "definition": "承销",
+          "example": "The underwriting process involves several key players."
+        }
+      ],
+      "grammar": [
+        {
+          "point": "被动语态",
+          "detail": "must be registered 使用被动语态，强调动作的承受者..."
+        }
+      ]
+    }
+  ]
+}
+
+## 分段规则
+- 将输入文本分为 1 到 3 个 chunk，每个 chunk 包含 1 到 3 个自然段落
+- 每个 chunk 必须有完整意义，不可在句子中间断开
+- 如果输入文本只有一个有效段落，则只输出 1 个 chunk
+- 每个 chunk 的 vocab 包含 3 到 8 个词汇
+- 每个 chunk 的 grammar 包含 1 到 3 个语法点
+- 不要提取人名（如 Steven）和无关冠词/介词作为词汇
+
+## 铁律（违反即错误）
+- 只输出 JSON 对象本身，不要用 json 代码块包裹
+- 输出必须以 { 开头，以 } 结尾
+- JSON 必须是合法的，可以被 JSON.parse() 直接解析
+- 如果输入无法解析为教材文本，返回：{"error": "无法解析该文本"}
+- 不要使用斜体标记，用加粗代替强调`
+
+type ReaderChunkResponse struct {
+	Page        int     `json:"page"`
+	PageEnd     int     `json:"page_end"`
+	PageLabel   string  `json:"page_label"`
+	Section     string  `json:"section"`
+	Chunks      []Chunk `json:"chunks"`
+	TotalChunks int     `json:"total_chunks"`
+	Error       string  `json:"error,omitempty"`
+}
+
+type Chunk struct {
+	En      string        `json:"en"`
+	Zh      string        `json:"zh"`
+	Vocab   []VocabEntry  `json:"vocab"`
+	Grammar []GrammarNote `json:"grammar"`
+}
+
+type VocabEntry struct {
+	Word       string `json:"word"`
+	Pos        string `json:"pos"`
+	Definition string `json:"definition"`
+	Example    string `json:"example"`
+}
+
+type GrammarNote struct {
+	Point  string `json:"point"`
+	Detail string `json:"detail"`
+}
+
+type ReaderProgress struct {
+	CurrentPage      int      `json:"current_page"`
+	CurrentChunk     int      `json:"current_chunk"`
+	CurrentSection   string   `json:"current_section"`
+	CompletedSections []string `json:"completed_sections"`
+	LastRead         string   `json:"last_read"`
+}
+
+type SaveProgressRequest struct {
+	CurrentPage  int    `json:"current_page"`
+	CurrentChunk int    `json:"current_chunk"`
+	Section      string `json:"section"`
 }
 
 type Example struct {

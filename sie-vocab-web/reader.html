@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SIE 教材阅读</title>
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <link rel="stylesheet" href="/css/style.css?v=12">
+</head>
+<body>
+<div class="wrapper-wide">
+    <!-- 导航栏 -->
+    <nav class="nav-bar">
+        <a href="/" class="nav-link">首页</a>
+        <a href="/review.html" class="nav-link">复习</a>
+        <span class="nav-current">阅读</span>
+    </nav>
+
+    <div class="header">
+        <h1>SIE 教材阅读</h1>
+        <p id="reader-subtitle">正在加载进度…</p>
+    </div>
+
+    <!-- 页面导航栏 -->
+    <div class="reader-page-nav">
+        <button id="btn-prev-page" class="btn-page-nav" onclick="prevPage()">上一页</button>
+        <span id="reader-page-display" class="reader-page-label">第 -- 页</span>
+        <button id="btn-next-page" class="btn-page-nav" onclick="nextPage()">下一页</button>
+        <span class="reader-jump">
+            跳转: <input id="input-jump-page" type="number" min="1" placeholder="页号"
+                  onkeydown="if(event.key==='Enter')jumpToPage()">
+            <button class="btn-jump" onclick="jumpToPage()">跳转</button>
+        </span>
+    </div>
+
+    <!-- 进度指示 -->
+    <div id="reader-progress" class="reader-progress"></div>
+
+    <!-- 主布局：左侧图片 + 右侧内容 -->
+    <div class="reader-layout">
+        <!-- 左侧：PDF 原页图片 -->
+        <div class="reader-left">
+            <div class="reader-image-label">PDF 原页</div>
+            <div id="reader-image-container" class="reader-image-container">
+                <div class="reader-image-placeholder">加载中…</div>
+            </div>
+        </div>
+
+        <!-- 右侧：内容区 -->
+        <div class="reader-right">
+            <div id="reader-content" class="reader-content">
+                <div id="reader-loading" class="review-loading" style="display:none;">正在加载页面内容…</div>
+                <div id="reader-error" class="reader-error" style="display:none;"></div>
+                <div id="reader-empty" class="reader-empty" style="display:none;">
+                    <div class="all-done-icon">📄</div>
+                    <div class="all-done-title">此页无文本内容</div>
+                    <div class="all-done-sub">可能是空白页或章节分隔页，请跳转到下一页面</div>
+                </div>
+                <div id="reader-main" style="display:none;">
+                    <div id="reader-section" class="reader-section"></div>
+                    <div class="reader-block">
+                        <div class="reader-block-label">原文 / Original</div>
+                        <div id="reader-en" class="reader-en"></div>
+                    </div>
+                    <div class="reader-block">
+                        <div class="reader-block-label">译文 / Translation</div>
+                        <div id="reader-zh" class="reader-zh"></div>
+                    </div>
+                    <div class="reader-block">
+                        <div class="reader-block-label">词汇表 / Vocabulary</div>
+                        <div id="reader-vocab" class="reader-vocab"></div>
+                    </div>
+                    <div class="reader-block">
+                        <div class="reader-block-label">语法笔记 / Grammar</div>
+                        <div id="reader-grammar" class="reader-grammar"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 底部操作 -->
+            <div id="reader-actions" class="reader-actions" style="display:none;">
+                <div class="reader-chunk-nav">
+                    <button id="btn-prev-chunk" class="btn-chunk-nav" onclick="prevChunk()">上一段</button>
+                    <span id="reader-chunk-display" class="reader-chunk-label">1 / 3</span>
+                    <button id="btn-next-chunk" class="btn-chunk-nav" onclick="nextChunk()">下一段</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 单词查询弹窗 -->
+<div id="word-modal" class="word-modal" onclick="closeModal(event)">
+    <div class="word-modal-content" onclick="event.stopPropagation()">
+        <div class="word-modal-header">
+            <span class="word-modal-title">单词查询</span>
+            <button class="word-modal-close" onclick="closeModal()">✕</button>
+        </div>
+        <div id="word-modal-body" class="word-modal-body"></div>
+    </div>
+</div>
+
+<script src="/js/reader.js?v=12"></script>
+</body>
+</html>

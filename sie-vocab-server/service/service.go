@@ -1,13 +1,19 @@
 package service
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"os/exec"
+	"strings"
+	"time"
 
 	"sie-vocab-server/client"
 	"sie-vocab-server/model"
+	"sie-vocab-server/pdf"
 	"sie-vocab-server/repo"
 )
 
@@ -237,6 +243,247 @@ func HandleReviewFreeRecord(w http.ResponseWriter, r *http.Request) {
 		"base_count":       bCount,
 		"next_review_date": nextDate,
 	})
+}
+
+// ---------- 教材阅读 ----------
+
+// HandleReaderChunk returns AI-analyzed content for a single PDF page.
+// If the page ends mid-paragraph, the跨页 paragraph is completed from the next page.
+func HandleReaderChunk(cfg *model.Config) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "只接受 POST 请求"})
+			return
+		}
+
+		var req struct {
+			Page int `json:"page"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Page <= 0 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "page 参数无效"})
+			return
+		}
+
+		log.Printf("📖 阅读请求: page=%d", req.Page)
+
+		// 1. Check cache
+		cached, err := repo.GetCachedReaderPage(req.Page)
+		if err != nil {
+			log.Printf("⚠️ 查询 reader_cache 失败: %v", err)
+		}
+		if cached != nil {
+			log.Printf("✅ reader 缓存命中: page=%d, chunks=%d", req.Page, cached.TotalChunks)
+			writeJSON(w, http.StatusOK, cached)
+			return
+		}
+
+		// 2. Extract current page text
+		pageText, err := pdf.ExtractPageText(cfg.SIE_PDFPath, req.Page)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "PDF 提取失败"})
+			return
+		}
+		if pageText == "" {
+			writeJSON(w, http.StatusOK, model.ReaderChunkResponse{
+				Page:    req.Page,
+				PageEnd: req.Page + 1,
+				Error:   "该页无文本内容",
+			})
+			return
+		}
+
+		// 3. Check if page ends mid-paragraph: no double-newline at end
+		pageText = strings.TrimSpace(pageText)
+		if !strings.HasSuffix(pageText, "\n\n") && pageText != "" {
+			// Page ends mid-paragraph — fetch next page's first paragraph to complete it
+			nextText, err := pdf.ExtractPageText(cfg.SIE_PDFPath, req.Page+1)
+			if err == nil && nextText != "" {
+				nextText = strings.TrimSpace(nextText)
+				// Take only the first paragraph from the next page (up to first double newline)
+				if idx := strings.Index(nextText, "\n\n"); idx > 0 {
+					nextText = nextText[:idx]
+				}
+				pageText += "\n\n" + nextText
+				log.Printf("📎 跨页段落补齐: page=%d, 从 page=%d 取了 %d 字", req.Page, req.Page+1, len(nextText))
+			}
+		}
+
+		log.Printf("📄 PDF 提取: page=%d, 总长=%d", req.Page, len(pageText))
+
+		// 4. Call DeepSeek
+		reply, err := client.CallDeepSeekWithSystem(cfg.DeepSeekAPIKey, model.ReaderSystemPrompt, pageText)
+		if err != nil {
+			log.Printf("❌ DeepSeek 调用失败: %v", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "AI 分析失败"})
+			return
+		}
+
+		// 5. Parse response
+		result, err := parseReaderReply(reply)
+		if err != nil {
+			log.Printf("❌ 解析 DeepSeek 回复失败: %v\n原始回复: %.200s", err, reply)
+			writeJSON(w, http.StatusOK, model.ReaderChunkResponse{
+				Page:    req.Page,
+				PageEnd: req.Page + 1,
+				Error:   "AI 回复解析失败，请重试",
+			})
+			return
+		}
+		result.Page = req.Page
+		result.PageEnd = req.Page + 1
+		result.TotalChunks = len(result.Chunks)
+
+		// 6. Cache
+		go func() {
+			if err := repo.SaveCachedReaderPage(req.Page, result.Section, pageText, result); err != nil {
+				log.Printf("❌ 保存 reader_cache 失败: %v", err)
+			}
+		}()
+
+		log.Printf("✅ reader 分析完成: page=%d section=%q chunks=%d", req.Page, result.Section, result.TotalChunks)
+		writeJSON(w, http.StatusOK, result)
+	}
+}
+
+// HandleReaderProgress handles GET (load) and POST (save) for reading progress.
+func HandleReaderProgress(cfg *model.Config) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			p := loadProgress(cfg.SIE_ProgressPath)
+			writeJSON(w, http.StatusOK, p)
+		case http.MethodPost:
+			var req model.SaveProgressRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "请求格式错误"})
+				return
+			}
+			p := loadProgress(cfg.SIE_ProgressPath)
+			p.CurrentPage = req.CurrentPage
+			p.CurrentChunk = req.CurrentChunk
+			if req.Section != "" {
+				p.CurrentSection = req.Section
+			}
+			p.LastRead = time.Now().Format("2006-01-02")
+			saveProgress(cfg.SIE_ProgressPath, p)
+			writeJSON(w, http.StatusOK, map[string]bool{"success": true})
+		default:
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "不支持的请求方法"})
+		}
+	}
+}
+
+// HandleReaderPageImage renders a PDF page as PNG image.
+// GET /api/reader/page-image?page=67
+func HandleReaderPageImage(cfg *model.Config) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "只接受 GET 请求"})
+			return
+		}
+
+		pageStr := r.URL.Query().Get("page")
+		if pageStr == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "page 参数必填"})
+			return
+		}
+		var page int
+		if _, err := fmt.Sscanf(pageStr, "%d", &page); err != nil || page <= 0 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "page 参数无效"})
+			return
+		}
+
+		// Check cache
+		cacheDir := "/tmp/sie-page-images"
+		cachePath := fmt.Sprintf("%s/page-%d.png", cacheDir, page)
+		if data, err := os.ReadFile(cachePath); err == nil {
+			w.Header().Set("Content-Type", "image/png")
+			w.Header().Set("Cache-Control", "public, max-age=86400")
+			w.Write(data)
+			return
+		}
+
+		// Render page to PNG using pdftoppm
+		os.MkdirAll(cacheDir, 0755)
+		tmpPrefix := fmt.Sprintf("%s/tmp-%d", cacheDir, page)
+		cmd := exec.Command("pdftoppm",
+			"-png", "-r", "150",
+			"-f", fmt.Sprintf("%d", page),
+			"-l", fmt.Sprintf("%d", page),
+			"-singlefile",
+			cfg.SIE_PDFPath, tmpPrefix,
+		)
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
+		if err := cmd.Run(); err != nil {
+			log.Printf("❌ pdftoppm 渲染失败 (page=%d): %v\nstderr: %s", page, err, stderr.String())
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "PDF 渲染失败"})
+			return
+		}
+
+		// Read rendered image and cache
+		tmpPath := tmpPrefix + ".png"
+		data, err := os.ReadFile(tmpPath)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "读取渲染图片失败"})
+			return
+		}
+		os.Rename(tmpPath, cachePath)
+
+		log.Printf("🖼️ 渲染 PDF 页面: page=%d, size=%d bytes", page, len(data))
+		w.Header().Set("Content-Type", "image/png")
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+		w.Write(data)
+	}
+}
+
+// ---------- reader 辅助 ----------
+
+func loadProgress(path string) *model.ReaderProgress {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return &model.ReaderProgress{
+			CurrentPage:      67,
+			CurrentChunk:     0,
+			CurrentSection:   "Chapter 5: Securities Underwriting",
+			CompletedSections: []string{},
+			LastRead:         time.Now().Format("2006-01-02"),
+		}
+	}
+	var p model.ReaderProgress
+	if err := json.Unmarshal(data, &p); err != nil {
+		return &model.ReaderProgress{
+			CurrentPage:      67,
+			CurrentChunk:     0,
+			CurrentSection:   "Chapter 5: Securities Underwriting",
+			CompletedSections: []string{},
+			LastRead:         time.Now().Format("2006-01-02"),
+		}
+	}
+	return &p
+}
+
+func saveProgress(path string, p *model.ReaderProgress) {
+	data, _ := json.MarshalIndent(p, "", "  ")
+	os.WriteFile(path, data, 0644)
+}
+
+func parseReaderReply(reply string) (*model.ReaderChunkResponse, error) {
+	var result model.ReaderChunkResponse
+	if err := json.Unmarshal([]byte(reply), &result); err == nil {
+		return &result, nil
+	}
+	cleaned := reply
+	if idx := strings.Index(cleaned, "{"); idx >= 0 {
+		cleaned = cleaned[idx:]
+	}
+	if idx := strings.LastIndex(cleaned, "}"); idx >= 0 {
+		cleaned = cleaned[:idx+1]
+	}
+	if err := json.Unmarshal([]byte(cleaned), &result); err != nil {
+		return nil, fmt.Errorf("解析 AI 回复 JSON 失败: %v", err)
+	}
+	return &result, nil
 }
 
 // ---------- 工具 ----------

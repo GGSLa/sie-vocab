@@ -38,6 +38,9 @@ func main() {
 	http.HandleFunc("/api/review/record", service.HandleReviewRecord)
 	http.HandleFunc("/api/review/free/random", service.HandleReviewFreeRandom)
 	http.HandleFunc("/api/review/free/record", service.HandleReviewFreeRecord)
+	http.HandleFunc("/api/reader/chunk", service.HandleReaderChunk(cfg))
+	http.HandleFunc("/api/reader/progress", service.HandleReaderProgress(cfg))
+	http.HandleFunc("/api/reader/page-image", service.HandleReaderPageImage(cfg))
 
 	// 静态文件（禁用缓存）
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -80,6 +83,12 @@ func loadConfig() (*model.Config, error) {
 	}
 	if cfg.MySQL.Port == "" {
 		cfg.MySQL.Port = "3306"
+	}
+	if cfg.SIE_PDFPath == "" {
+		cfg.SIE_PDFPath = filepath.Join(filepath.Dir(exePath), "..", "SIE.pdf")
+	}
+	if cfg.SIE_ProgressPath == "" {
+		cfg.SIE_ProgressPath = filepath.Join(filepath.Dir(exePath), "sie-progress.json")
 	}
 	return &cfg, nil
 }

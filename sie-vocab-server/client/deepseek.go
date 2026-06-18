@@ -15,10 +15,15 @@ var httpClient = &http.Client{Timeout: 60 * time.Second}
 
 // CallDeepSeek 调用 DeepSeek API 进行单词翻译
 func CallDeepSeek(apiKey, message string) (string, error) {
+	return CallDeepSeekWithSystem(apiKey, model.SystemPrompt, message)
+}
+
+// CallDeepSeekWithSystem 调用 DeepSeek API，使用自定义 system prompt
+func CallDeepSeekWithSystem(apiKey, systemPrompt, message string) (string, error) {
 	body := map[string]interface{}{
 		"model": "deepseek-chat",
 		"messages": []map[string]string{
-			{"role": "system", "content": model.SystemPrompt},
+			{"role": "system", "content": systemPrompt},
 			{"role": "user", "content": message},
 		},
 	}

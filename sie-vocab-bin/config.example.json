@@ -7,5 +7,7 @@
     "user": "sie_vocab",
     "password": "填写数据库密码",
     "database": "sie_vocab"
-  }
+  },
+  "sie_pdf_path": "/path/to/SIE.pdf",
+  "sie_progress_path": "/path/to/sie-progress.json"
 }
