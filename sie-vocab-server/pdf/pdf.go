@@ -701,8 +701,19 @@ func mergeHardWrappedLines(text string) string {
 				continue
 			}
 
-			// Always keep heading markers as standalone lines
+			// Heading markers: strip if the heading content is just a bullet/list marker
+			// (pdftohtml sometimes mislabels list items as headings, e.g. "### •")
 			if isHeadingLine(line) {
+				rest := stripHeadingPrefix(line)
+				if isListItem(rest) || isJustBulletMarker(rest) {
+					// This is actually a list item — strip heading markers, merge with next line
+					if current != "" {
+						merged = append(merged, current)
+						current = ""
+					}
+					current = rest
+					continue
+				}
 				if current != "" {
 					merged = append(merged, current)
 					current = ""
@@ -907,6 +918,23 @@ func isListItem(line string) bool {
 		}
 	}
 	return false
+}
+
+// stripHeadingPrefix removes leading "#" characters and whitespace from a heading line.
+// E.g. "### •" → "•", "## - text" → "- text"
+func stripHeadingPrefix(line string) string {
+	s := strings.TrimSpace(line)
+	for strings.HasPrefix(s, "#") {
+		s = strings.TrimPrefix(s, "#")
+	}
+	return strings.TrimSpace(s)
+}
+
+// isJustBulletMarker returns true if the line is only a bullet/list marker character
+// (no text content after it). E.g. "•", "·", "–", "-"
+func isJustBulletMarker(line string) bool {
+	s := strings.TrimSpace(line)
+	return s == "•" || s == "·" || s == "–" || s == "-" || s == "--" || s == "---"
 }
 
 // ---------- PDF outline extraction ----------

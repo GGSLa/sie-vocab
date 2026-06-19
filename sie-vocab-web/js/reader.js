@@ -305,6 +305,8 @@ async function fetchPage(page) {
         saveProgress();
         // Refresh TOC in case a new page was cached
         loadToc();
+        // Preload next page in background for instant navigation
+        preloadNextPage(page + 1);
     } catch (err) {
         showError('请求失败: ' + esc(err.message));
     } finally {
@@ -344,12 +346,32 @@ function renderChunk() {
 
 function formatText(text) {
     if (!text) return '<p class="empty-note">（无内容）</p>';
+    // Fix DeepSeek output: "### •" mid-line → separate bullet lines
+    text = text.replace(/###\s*•\s*/g, '\n• ');
     // Split into blocks by double newlines
     const blocks = text.split(/\n\n+/);
     let html = '';
-    blocks.forEach(block => {
-        const trimmed = block.trim();
-        if (!trimmed) return;
+    for (let i = 0; i < blocks.length; i++) {
+        const trimmed = blocks[i].trim();
+        if (!trimmed) continue;
+
+        // Group consecutive » (callout) blocks into a single <p>
+        if (trimmed.startsWith('»')) {
+            let groupHTML = '';
+            while (i < blocks.length) {
+                const b = blocks[i].trim();
+                if (!b || !b.startsWith('»')) break;
+                const safe = esc(b.replace(/^»\s*/, ''));
+                const clickable = safe.replace(/\b([a-zA-Z]+(?:'[a-zA-Z]+)?)\b/g,
+                    '<span class="word-clickable" data-word="$1" onclick="lookupWord(this)" title="点击查词">$1</span>');
+                groupHTML += '<span class="reader-callout-line">» ' + clickable + '</span>';
+                i++;
+            }
+            i--; // compensate for outer for loop increment
+            html += '<p class="callout-group">' + groupHTML + '</p>';
+            continue;
+        }
+
         // Split block into individual lines
         const lines = trimmed.split('\n');
         let blockHTML = '';
@@ -381,7 +403,7 @@ function formatText(text) {
         if (blockHTML) {
             html += '<p>' + blockHTML + '</p>';
         }
-    });
+    }
     return html || '<p class="empty-note">（无内容）</p>';
 }
 
@@ -496,6 +518,34 @@ function loadPageImage(page) {
         '<img src="/api/reader/page-image?book=' + currentBookId + '&page=' + page + '&t=' + Date.now() + '" ' +
         'alt="PDF Page ' + page + '" onerror="this.parentElement.innerHTML=\'<div class=reader-image-placeholder>图片加载失败</div>\'">' +
         '</div>';
+}
+
+// ============ Preload Next Page ============
+
+let preloadController = null;  // AbortController for cancelling stale preloads
+
+async function preloadNextPage(page) {
+    // Cancel any previous preload that's still in flight
+    if (preloadController) {
+        preloadController.abort();
+    }
+    preloadController = new AbortController();
+
+    try {
+        // Fire both chunk and image requests in parallel, don't await
+        fetch('/api/reader/chunk', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({book_id: currentBookId, page: page}),
+            signal: preloadController.signal
+        }).catch(() => {});  // silently ignore preload errors
+
+        // Also preload the PDF page image
+        const img = new Image();
+        img.src = '/api/reader/page-image?book=' + currentBookId + '&page=' + page;
+    } catch (e) {
+        // Silently ignore preload errors
+    }
 }
 
 // ============ Word Lookup Modal ============
