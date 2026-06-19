@@ -144,6 +144,7 @@ curl -s http://localhost:8080/ | head -5
     "database": "sie_vocab"
   },
   "deepseek_api_key": "...",
+  "api_token": "",              // 可选，设置后所有 /api/* 需要 Bearer 认证
   "deepseek_rpm": 10,
   "deepseek_max_concurrent": 3,
   "upload_dir": "/var/sie-vocab/pdfs",
@@ -153,11 +154,19 @@ curl -s http://localhost:8080/ | head -5
 
 ## 已知限制
 
-- 单用户模式，无认证系统
+- 单用户模式（已支持可选 Bearer token 认证）
 - 前端无构建工具，纯手写 HTML/CSS/JS
 - 过期判断使用 4AM 分割线，可能与前端时区有差异
 - AI 分析首次请求需等待 DeepSeek 响应（约 30s-2min），缓存后毫秒返回
 - PDF 硬换行合并为启发式算法，极少数边缘情况可能合并不足或过度
+
+## 安全
+
+- **API 认证**：`config.json` 中设置 `api_token` 即可启用 Bearer token 认证
+- **安全头**：CSP / X-Frame-Options / X-Content-Type-Options / Referrer-Policy 已配置
+- **OCR 白名单**：上传 PDF 时 `ocr_lang` 仅允许预定义语言码
+- **PDF 校验**：上传时检查 `%PDF` 文件头魔数
+- **命令超时**：所有外部命令（pdftotext/pdftoppm/tesseract）均设 60s/120s 超时
 
 ## 设计
 
