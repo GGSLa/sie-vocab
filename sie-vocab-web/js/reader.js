@@ -7,6 +7,10 @@ let tocExpanded = false;
 let tocData = [];          // hierarchical outline
 let tocDataFlat = [];      // fallback: flat cached pages
 let tocCachedPages = {};   // page -> bool for cached markers
+let lookupMode = 'new';       // 'new' | 'cached' — current modal display mode
+let lookupDBWords = null;     // DB word data when in cached mode
+let lookupAIWords = null;     // AI word data when in new mode (for save)
+let lookupVocabBtnEl = null;  // original vocab table button ref (for updating after diff save)
 
 function esc(s) {
     if (!s) return '';
@@ -20,15 +24,34 @@ window.addEventListener('DOMContentLoaded', () => { loadProgress(); loadToc(); }
 async function loadProgress() {
     showLoading('正在加载进度…');
     try {
-        const res = await fetch('/api/reader/progress');
-        const data = await res.json();
-        currentPage = data.current_page || 67;
-        currentChunkIndex = data.current_chunk || 0;
-        document.getElementById('reader-subtitle').textContent =
-            data.current_section || 'SIE 考试教材';
+        // Check URL param for shared page link (e.g. ?page=100)
+        const urlParams = new URLSearchParams(window.location.search);
+        const urlPage = parseInt(urlParams.get('page'));
+
+        if (urlPage && urlPage > 0) {
+            // Shared link — override saved progress
+            currentPage = urlPage;
+            currentChunkIndex = 0;
+        } else {
+            const res = await fetch('/api/reader/progress');
+            const data = await res.json();
+            currentPage = data.current_page || 67;
+            currentChunkIndex = data.current_chunk || 0;
+            document.getElementById('reader-subtitle').textContent =
+                data.current_section || 'SIE 考试教材';
+        }
         await fetchPage(currentPage);
     } catch (err) {
         showError('加载进度失败: ' + esc(err.message));
+    }
+}
+
+// Sync browser URL with current page (replaceState, no history push)
+function syncPageURL() {
+    const url = new URL(window.location);
+    if (url.searchParams.get('page') != currentPage) {
+        url.searchParams.set('page', currentPage);
+        window.history.replaceState(null, '', url.toString());
     }
 }
 
@@ -90,34 +113,80 @@ function renderTocOutline() {
     let html = renderTocItems(tocData, 0);
     list.innerHTML = html || '<div class="reader-toc-empty">无目录条目</div>';
     highlightTocPage();
+    // Auto-expand the branch containing the current page
+    expandTocToPage(currentPage);
+}
+
+// Expand parent containers from the active item up to root
+function expandTocToPage(page) {
+    const activeItem = document.querySelector('.reader-toc-item[data-page="' + page + '"]');
+    if (!activeItem) return;
+    let el = activeItem;
+    while (el) {
+        // For each parent .toc-children, remove collapsed
+        if (el.classList.contains('toc-children')) {
+            el.classList.remove('collapsed');
+            // Also update the arrow of the parent item
+            const parentItem = el.previousElementSibling;
+            if (parentItem && parentItem.classList.contains('reader-toc-item')) {
+                const arrow = parentItem.querySelector('.toc-arrow');
+                if (arrow) arrow.textContent = '▼';
+            }
+        }
+        el = el.parentElement;
+    }
 }
 
 function renderTocItems(items, depth) {
     if (!items || items.length === 0) return '';
     let html = '';
     items.forEach(e => {
+        const hasChildren = e.children && e.children.length > 0;
         let cls = 'reader-toc-item';
         if (e.level <= 0) cls += ' toc-level-part';
         else if (e.level === 1) cls += ' toc-level-chapter';
         else cls += ' toc-level-section';
         if (tocCachedPages && tocCachedPages[e.page]) cls += ' toc-cached';
+        if (hasChildren) cls += ' toc-has-children';
 
         html += '<div class="' + cls + '" data-page="' + e.page +
-            '" style="padding-left:' + (16 + depth * 14) + 'px" ' +
-            'onclick="jumpToTocPage(' + e.page + ')">' +
-            '<span class="reader-toc-page-num">P.' + e.page + '</span>' +
-            '<span class="reader-toc-page-title">' + esc(e.title) + '</span>';
+            '" style="padding-left:' + (16 + depth * 14) + 'px"';
+
+        if (hasChildren) {
+            // Parent item: arrow toggles children, title + P.N navigate
+            html += '>' +
+                '<span class="toc-arrow" onclick="event.stopPropagation(); toggleTocChildren(this)">▶</span>';
+        } else {
+            // Leaf item: click anywhere navigates
+            html += ' onclick="jumpToTocPage(' + e.page + ')">';
+        }
+
+        html += '<span class="reader-toc-page-num" onclick="event.stopPropagation(); jumpToTocPage(' + e.page + ')">P.' + e.page + '</span>' +
+            '<span class="reader-toc-page-title" onclick="event.stopPropagation(); jumpToTocPage(' + e.page + ')">' + esc(e.title) + '</span>';
         if (tocCachedPages && tocCachedPages[e.page]) {
             html += '<span class="toc-dot" title="已读"></span>';
         }
         html += '</div>';
 
-        // Render children (subsections)
-        if (e.children && e.children.length > 0) {
+        // Children wrapped in collapsible container (collapsed by default)
+        if (hasChildren) {
+            html += '<div class="toc-children collapsed">';
             html += renderTocItems(e.children, depth + 1);
+            html += '</div>';
+        } else if (e.children && e.children.length === 0) {
+            // No children — nothing to wrap
         }
     });
     return html;
+}
+
+function toggleTocChildren(arrow) {
+    const parent = arrow.parentElement;
+    const children = parent.nextElementSibling;
+    if (!children || !children.classList.contains('toc-children')) return;
+
+    const collapsed = children.classList.toggle('collapsed');
+    arrow.textContent = collapsed ? '▶' : '▼';
 }
 
 function renderTocFlat() {
@@ -147,9 +216,12 @@ function highlightTocPage() {
     document.querySelectorAll('.reader-toc-item').forEach(el => {
         el.classList.toggle('active', parseInt(el.getAttribute('data-page')) === currentPage);
     });
+    // Also expand the branch containing the current page
+    expandTocToPage(currentPage);
 }
 
 function jumpToTocPage(page) {
+    if (loading) return;
     currentChunkIndex = 0;
     fetchPage(page);
 }
@@ -192,7 +264,7 @@ async function fetchPage(page) {
         pageData = data;
         currentPage = page;
         if (currentChunkIndex >= data.chunks.length) {
-            currentChunkIndex = 0;
+            currentChunkIndex = data.chunks.length - 1;  // clamp to last chunk
         }
         renderChunk();
         updatePageNav();
@@ -200,6 +272,7 @@ async function fetchPage(page) {
         document.getElementById('reader-main').style.display = 'block';
         document.getElementById('reader-actions').style.display = 'block';
         document.getElementById('reader-subtitle').textContent = data.section || 'SIE 考试教材';
+        syncPageURL();  // keep URL in sync with current page for sharing
         saveProgress();
         // Refresh TOC in case a new page was cached
         loadToc();
@@ -323,7 +396,7 @@ function renderGrammar(grammar) {
 // ============ Navigation ============
 
 function nextChunk() {
-    if (!pageData || !pageData.chunks) return;
+    if (loading || !pageData || !pageData.chunks) return;
     if (currentChunkIndex < pageData.chunks.length - 1) {
         currentChunkIndex++;
         renderChunk();
@@ -334,27 +407,30 @@ function nextChunk() {
 }
 
 function prevChunk() {
-    if (!pageData) return;
+    if (loading || !pageData) return;
     if (currentChunkIndex > 0) {
         currentChunkIndex--;
         renderChunk();
         saveProgress();
+    } else {
+        prevPage();
     }
 }
 
 function nextPage() {
+    if (loading) return;
     currentChunkIndex = 0;
     fetchPage(currentPage + 1);
 }
 
 function prevPage() {
-    if (currentPage > 1) {
-        currentChunkIndex = 0;
-        fetchPage(currentPage - 1);
-    }
+    if (loading || currentPage <= 1) return;
+    currentChunkIndex = 2147483647;  // large sentinel → clamped to last chunk in fetchPage
+    fetchPage(currentPage - 1);
 }
 
 function jumpToPage() {
+    if (loading) return;
     const input = document.getElementById('input-jump-page');
     const page = parseInt(input.value);
     if (page > 0) {
@@ -405,6 +481,34 @@ async function lookupWord(el) {
     modalBody.innerHTML = '<div class="review-loading">正在查询 <strong>' + esc(word) + '</strong>…</div>';
 
     try {
+        // Step 1: Check database first (same logic as index page)
+        const qRes = await fetch('/api/word/query', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({word: word})
+        });
+        const qData = await qRes.json();
+
+        if (qData.found && qData.data && qData.data.words && qData.data.words.length > 0) {
+            // Already in database — show cached view
+            lookupMode = 'cached';
+            lookupDBWords = qData.data.words;
+            lookupAIWords = null;
+            modalBody.innerHTML = renderLookupCardCached(qData.data.words);
+        } else {
+            // Not in database — call AI
+            lookupMode = 'new';
+            lookupDBWords = null;
+            await fetchLookupAI(word, modalBody);
+        }
+    } catch (err) {
+        modalBody.innerHTML = '<div class="error-msg">请求失败: ' + esc(err.message) + '</div>';
+    }
+}
+
+async function fetchLookupAI(word, modalBody) {
+    modalBody.innerHTML = '<div class="review-loading">正在分析 <strong>' + esc(word) + '</strong>…</div>';
+    try {
         const res = await fetch('/api/chat', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
@@ -420,10 +524,120 @@ async function lookupWord(el) {
             modalBody.innerHTML = '<div class="error-msg">无法解析该单词</div>';
             return;
         }
-        modalBody.innerHTML = renderLookupCard(parsed.words);
+        lookupMode = 'new';
+        lookupAIWords = parsed.words;
+        modalBody.innerHTML = renderLookupCardNew(parsed.words);
     } catch (err) {
         modalBody.innerHTML = '<div class="error-msg">请求失败: ' + esc(err.message) + '</div>';
     }
+}
+
+async function retranslateLookupWord() {
+    const modalBody = document.getElementById('word-modal-body');
+    if (!lookupDBWords || lookupDBWords.length === 0) return;
+    const word = lookupDBWords[0].word;
+    await fetchLookupAIForDiff(word, modalBody);
+}
+
+// Fetch AI for diff comparison — renders old DB vs new AI side by side
+async function fetchLookupAIForDiff(word, modalBody) {
+    modalBody.innerHTML = '<div class="review-loading">正在分析 <strong>' + esc(word) + '</strong>…</div>';
+    try {
+        const res = await fetch('/api/chat', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({message: word})
+        });
+        const data = await res.json();
+        if (data.error) {
+            modalBody.innerHTML = '<div class="error-msg">翻译失败: ' + esc(data.error) + '</div>';
+            return;
+        }
+        const parsed = parseReplyJSON(data.reply);
+        if (!parsed || !parsed.words || parsed.words.length === 0) {
+            modalBody.innerHTML = '<div class="error-msg">无法解析该单词</div>';
+            return;
+        }
+        lookupMode = 'diff';
+        lookupAIWords = parsed.words;
+        modalBody.innerHTML = renderLookupCardDiff(lookupDBWords, parsed.words);
+    } catch (err) {
+        modalBody.innerHTML = '<div class="error-msg">请求失败: ' + esc(err.message) + '</div>';
+    }
+}
+
+// Render diff view — old DB vs new AI side by side (like index page diff)
+function renderLookupCardDiff(oldWords, newWords, saveLabel) {
+    const label = saveLabel || '💾 保存新版';
+    let html = '<div class="action-bar" style="margin-bottom:12px">';
+    html += '<span style="color:#7ec8e3;font-weight:600">📋 新旧对比 / Compare</span>';
+    html += '</div>';
+
+    const oldMap = new Map(oldWords.map(w => [w.word, w]));
+    const newMap = new Map(newWords.map(w => [w.word, w]));
+
+    newWords.forEach((w, idx) => {
+        const old = oldMap.get(w.word);
+
+        html += '<div class="diff-compare-box" style="margin-bottom:16px">';
+
+        // Header
+        let headerBadges = '';
+        if (!old) {
+            headerBadges = '<span class="badge-sm">🆕 新发现</span>';
+        } else if (!deepEqualLookup(old, w)) {
+            headerBadges = '<span class="diff-changed-badge">有变更</span>';
+        }
+        html += '<div class="diff-compare-box-header">';
+        html += '<span class="word-title">' + esc(w.word) + '</span>' + headerBadges;
+        html += '</div>';
+
+        // Body — old/new side by side
+        html += '<div class="diff-compare-box-body" style="display:flex;gap:6px;flex-wrap:wrap">';
+
+        if (old) {
+            html += '<div class="diff-panel old" style="flex:1;min-width:180px">';
+            html += '<div class="diff-panel-label">旧版（数据库）</div>';
+            html += renderLookupCardContent([old], 'none');
+            html += '</div>';
+        }
+
+        html += '<div class="diff-panel new" style="flex:1;min-width:180px">';
+        html += '<div class="diff-panel-label">新版（AI）</div>';
+        html += renderLookupCardContent([w], 'none');
+        html += '</div>';
+
+        html += '</div>'; // body
+
+        // Actions
+        html += '<div class="diff-compare-actions" style="margin-top:8px;text-align:right">';
+        html += '<button class="btn-save" onclick="saveLookupWord(' + idx + ', this)">' + label + '</button>';
+        html += '</div>';
+
+        html += '</div>'; // diff-compare-box
+    });
+
+    // Old words not in new AI result
+    oldWords.forEach(w => {
+        if (!newMap.has(w.word)) {
+            html += '<div class="diff-compare-box" style="margin-bottom:16px;opacity:0.7">';
+            html += '<div class="diff-compare-box-header">';
+            html += '<span class="word-title">' + esc(w.word) + '</span>';
+            html += '<span class="diff-only-old-badge">旧版独有（新版已移除）</span>';
+            html += '</div>';
+            html += renderLookupCardContent([w], 'none');
+            html += '</div>';
+        }
+    });
+
+    return html;
+}
+
+// Simple deep compare for diff detection (matches index page logic)
+function deepEqualLookup(a, b) {
+    const ja = JSON.stringify({m: a.meanings, e: a.examples, p: a.pos, d: a.derivation});
+    const jb = JSON.stringify({m: b.meanings, e: b.examples, p: b.pos, d: b.derivation});
+    return ja === jb;
 }
 
 function parseReplyJSON(reply) {
@@ -435,12 +649,29 @@ function parseReplyJSON(reply) {
     try { return JSON.parse(cleaned); } catch (e) { return null; }
 }
 
-function renderLookupCard(words) {
+// Render cached DB data — shows "已保存" notice + "仍要翻译" button (like index page)
+function renderLookupCardCached(words) {
+    let html = '<div class="action-bar" style="margin-bottom:12px">';
+    html += '<span class="cached-notice"><span class="dot"></span> 来自数据库（已保存）</span>';
+    html += '<button class="btn-retranslate" onclick="retranslateLookupWord()">🔄 仍要翻译</button>';
+    html += '</div>';
+    html += renderLookupCardContent(words, 'cached');
+    return html;
+}
+
+// Render AI result — shows save buttons
+function renderLookupCardNew(words) {
+    return renderLookupCardContent(words, 'new');
+}
+
+// Common card rendering shared by cached and new modes
+function renderLookupCardContent(words, mode) {
     let html = '';
     words.forEach((w, idx) => {
         html += '<div class="word-card" style="margin-bottom:16px">';
         html += '<div class="word-header">';
-        html += '<span class="word-name">' + esc(w.word) + '</span>';
+        html += '<span class="word-name">' + esc(w.word) + '</span>' +
+            '<span class="btn-speak-inline" onclick="event.stopPropagation(); speakWordInline(this)" title="朗读发音">🔊</span>';
         html += '<span class="badge ' + (w.type === '基础词' ? 'badge-base' : 'badge-derived') + '">' + esc(w.type) + '</span>';
         html += '<span class="pos-tag">' + esc(w.pos || '') + '</span>';
         html += '</div>';
@@ -465,9 +696,11 @@ function renderLookupCard(words) {
             });
             html += '</table>';
         }
-        html += '<div class="word-actions">';
-        html += '<button class="btn-save" onclick="saveLookupWord(' + idx + ', this)" data-word=\'' + JSON.stringify(w) + '\'>保存此词</button>';
-        html += '</div>';
+        if (mode === 'new') {
+            html += '<div class="word-actions">';
+            html += '<button class="btn-save" onclick="saveLookupWord(' + idx + ', this)">💾 保存此词</button>';
+            html += '</div>';
+        }
         html += '</div>';
     });
     return html;
@@ -477,7 +710,47 @@ async function saveVocabWord(index, btnEl) {
     if (!pageData || !pageData.chunks || !pageData.chunks[currentChunkIndex]) return;
     const v = pageData.chunks[currentChunkIndex].vocab[index];
     if (!v) return;
-    btnEl.disabled = true; btnEl.textContent = '保存中…';
+
+    // Step 1: Check if word already exists in DB
+    btnEl.disabled = true; btnEl.textContent = '检查中…';
+    try {
+        const qRes = await fetch('/api/word/query', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({word: v.word})
+        });
+        const qData = await qRes.json();
+        if (qData.found && qData.data && qData.data.words && qData.data.words.length > 0) {
+            // Already exists — show diff modal so user can compare before overwriting
+            btnEl.textContent = '对比中';
+            lookupVocabBtnEl = btnEl;  // remember original button for later update
+
+            // Construct WordEntry from vocab data as "new version"
+            const vocabEntry = {
+                word: v.word, type: '基础词', pos: v.pos || '', baseWord: null, derivation: null,
+                meanings: [{domain: '金融', text: v.definition}],
+                examples: v.example ? [{en: v.example, zh: ''}] : []
+            };
+
+            // Set state and show diff in modal
+            lookupMode = 'diff-vocab';
+            lookupDBWords = qData.data.words;
+            lookupAIWords = [vocabEntry];
+
+            const modal = document.getElementById('word-modal');
+            const modalBody = document.getElementById('word-modal-body');
+            modal.style.display = 'flex';
+            modalBody.innerHTML = renderLookupCardDiff(qData.data.words, [vocabEntry], '💾 覆盖保存');
+            return;
+        }
+    } catch (err) {
+        btnEl.textContent = '失败';
+        btnEl.disabled = false;
+        return;
+    }
+
+    // Step 2: Word doesn't exist — proceed with save
+    btnEl.textContent = '保存中…';
     const wordEntry = {
         word: v.word, type: '基础词', pos: v.pos || '', baseWord: null, derivation: null,
         meanings: [{domain: '金融', text: v.definition}],
@@ -492,15 +765,80 @@ async function saveVocabWord(index, btnEl) {
 }
 
 async function saveLookupWord(index, btnEl) {
+    // Read word data from in-memory lookupAIWords (avoids HTML attribute escaping issues)
     let w;
-    try { w = JSON.parse(btnEl.getAttribute('data-word')); } catch (e) { btnEl.textContent = '失败'; return; }
-    btnEl.disabled = true; btnEl.textContent = '保存中…';
+    if (lookupAIWords && lookupAIWords[index]) {
+        w = lookupAIWords[index];
+    } else {
+        btnEl.textContent = '失败';
+        return;
+    }
+
+    // diff-vocab mode: intentional overwrite, skip DB check
+    if (lookupMode === 'diff-vocab') {
+        btnEl.disabled = true; btnEl.textContent = '覆盖中…';
+        try {
+            const res = await fetch('/api/word/save', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(w)});
+            const data = await res.json();
+            btnEl.textContent = data.success ? '已覆盖' : '失败';
+            if (data.success) {
+                btnEl.className = 'btn-save saved';
+                // Also update the original vocab table button
+                if (lookupVocabBtnEl) {
+                    lookupVocabBtnEl.textContent = '已覆盖';
+                    lookupVocabBtnEl.className = 'btn-save-small saved';
+                    lookupVocabBtnEl = null;
+                }
+            } else {
+                btnEl.disabled = false;
+            }
+        } catch (err) { btnEl.textContent = '失败'; btnEl.disabled = false; }
+        return;
+    }
+
+    // Step 1: Check if word already exists in DB
+    btnEl.disabled = true; btnEl.textContent = '检查中…';
+    try {
+        const qRes = await fetch('/api/word/query', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({word: w.word})
+        });
+        const qData = await qRes.json();
+        if (qData.found) {
+            btnEl.textContent = '已存在';
+            btnEl.className = 'btn-save saved';
+            return;
+        }
+    } catch (err) {
+        btnEl.textContent = '失败';
+        btnEl.disabled = false;
+        return;
+    }
+
+    // Step 2: Word doesn't exist — proceed with save
+    btnEl.textContent = '保存中…';
     try {
         const res = await fetch('/api/word/save', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(w)});
         const data = await res.json();
         btnEl.textContent = data.success ? '已保存' : '失败';
         if (data.success) btnEl.className = 'btn-save saved'; else btnEl.disabled = false;
     } catch (err) { btnEl.textContent = '失败'; btnEl.disabled = false; }
+}
+
+function speakWordInline(el) {
+    const nameEl = el.parentElement.querySelector('.word-name');
+    if (!nameEl) return;
+    const word = nameEl.textContent.trim();
+    if (!word) return;
+    window.speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(word);
+    u.lang = 'en-US';
+    u.rate = 0.85;
+    el.classList.add('speaking');
+    u.onend = () => el.classList.remove('speaking');
+    u.onerror = () => el.classList.remove('speaking');
+    window.speechSynthesis.speak(u);
 }
 
 function closeModal(event) {
@@ -523,6 +861,7 @@ function showError(msg) {
     el.style.display = 'block';
 }
 function retryCurrentPage() {
+    if (loading) return;
     hideError();
     fetchPage(currentPage);
 }

@@ -23,6 +23,13 @@
             position: relative;
             z-index: 1;
         }
+        .wrapper-review {
+            max-width: 960px;
+            margin: 0 auto;
+            padding: 50px 24px;
+            position: relative;
+            z-index: 1;
+        }
         .wrapper-wide {
             max-width: 95%;
             margin: 0 auto;
@@ -254,6 +261,7 @@
         .domain-tag.daily   { background: #dbeafe; color: #1e40af; }
 
         .example-table td:first-child { width: 30px; color: #aaa; text-align: center; }
+        .example-table th { white-space: nowrap; }
         .example-table tr { border-top: 1px solid #f0f0f0; }
         .example-table tr:first-child { border-top: none; }
 
@@ -537,21 +545,78 @@
             padding: 48px 36px;
             text-align: center;
             min-height: 280px;
+            position: relative;
         }
 
         .review-loading {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
             color: #7ec8e3;
             font-size: 1.2rem;
             font-weight: 600;
             display: flex;
             align-items: center;
             justify-content: center;
-            min-height: 180px;
+            background: rgba(255,255,255,0.85);
+            backdrop-filter: blur(8px);
+            border-radius: 20px;
+            z-index: 2;
         }
 
         /* 单词卡片 */
         .review-card {
             margin-bottom: 28px;
+        }
+
+        .btn-speak-inline {
+    display: inline-block;
+    padding: 2px 6px;
+    margin-left: 8px;
+    font-size: 0.85rem;
+    border: 1.5px solid rgba(126,200,227,0.3);
+    border-radius: 12px;
+    cursor: pointer;
+    background: rgba(255,255,255,0.6);
+    transition: all 0.15s;
+    vertical-align: middle;
+    user-select: none;
+}
+.btn-speak-inline:hover {
+    background: #7ec8e3;
+    border-color: #7ec8e3;
+}
+.btn-speak-inline.speaking {
+    background: #7ec8e3;
+    border-color: #7ec8e3;
+    animation: pulse-speak 0.6s infinite alternate;
+}
+
+.btn-speak {
+            display: inline-block;
+            padding: 6px 14px;
+            margin-bottom: 8px;
+            font-size: 1.2rem;
+            border: 2px solid rgba(126,200,227,0.3);
+            border-radius: 20px;
+            cursor: pointer;
+            background: rgba(255,255,255,0.8);
+            transition: all 0.2s;
+            user-select: none;
+        }
+        .btn-speak:hover {
+            background: #7ec8e3;
+            border-color: #7ec8e3;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(126,200,227,0.3);
+        }
+        .btn-speak.speaking {
+            background: #7ec8e3;
+            border-color: #7ec8e3;
+            animation: pulse-speak 0.6s infinite alternate;
+        }
+        @keyframes pulse-speak {
+            from { box-shadow: 0 0 0 0 rgba(126,200,227,0.4); }
+            to   { box-shadow: 0 0 0 8px rgba(126,200,227,0); }
         }
 
         .review-word-en {
@@ -566,7 +631,6 @@
             border: 2px solid rgba(126,200,227,0.15);
             box-shadow: inset 0 2px 10px rgba(126,200,227,0.06);
             line-height: 1.2;
-            word-break: break-word;
         }
 
         .btn-expand {
@@ -693,6 +757,155 @@
             box-shadow: 0 8px 25px rgba(245,158,11,0.4);
         }
         .btn-reset:active { transform: translateY(0); }
+
+/* ========== 总览模式 ========== */
+
+        .overview-container { text-align: center; }
+
+        .overview-stats {
+            display: flex;
+            gap: 16px;
+            margin-bottom: 32px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .stat-card {
+            background: linear-gradient(135deg, #f0f0ff 0%, #e8ecff 50%, #f5f0ff 100%);
+            border-radius: 16px;
+            padding: 20px 24px;
+            min-width: 120px;
+            flex: 1;
+            max-width: 180px;
+            border: 2px solid rgba(126,200,227,0.12);
+            box-shadow: 0 2px 10px rgba(126,200,227,0.06);
+        }
+
+        .stat-icon { font-size: 1.8rem; margin-bottom: 6px; }
+
+        .stat-value {
+            font-size: 2.2rem;
+            font-weight: 900;
+            color: #1e1b4b;
+            line-height: 1.2;
+        }
+
+        .stat-label {
+            font-size: 0.8rem;
+            color: #6b7280;
+            font-weight: 600;
+            margin-top: 2px;
+        }
+
+        /* 日历导航 */
+        .calendar-nav {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .cal-nav-btn {
+            padding: 8px 16px;
+            font-size: 1rem;
+            border: 2px solid rgba(126,200,227,0.3);
+            border-radius: 12px;
+            cursor: pointer;
+            background: #fff;
+            color: #5ba8d0;
+            font-weight: 700;
+            transition: all 0.2s;
+        }
+        .cal-nav-btn:hover {
+            background: #7ec8e3;
+            color: #fff;
+            border-color: #7ec8e3;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(126,200,227,0.3);
+        }
+
+        .cal-month-label {
+            font-size: 1.15rem;
+            font-weight: 800;
+            color: #1e1b4b;
+            min-width: 140px;
+        }
+
+        /* 日历网格 */
+        .calendar-grid {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 6px;
+            max-width: 560px;
+            margin: 0 auto;
+        }
+
+        /* 表头 */
+        .calendar-header {
+            padding: 8px 0;
+            font-size: 0.85rem;
+            font-weight: 700;
+            color: #6b7280;
+            text-align: center;
+            user-select: none;
+        }
+
+        /* 单元格 */
+        .calendar-cell {
+            aspect-ratio: 1;
+            border-radius: 10px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background: rgba(240,240,255,0.35);
+            border: 2px solid transparent;
+            min-height: 48px;
+            user-select: none;
+        }
+
+        .calendar-cell .date-number {
+            font-size: 0.95rem;
+            font-weight: 700;
+            color: #6b7280;
+            line-height: 1.2;
+        }
+
+        .calendar-cell .review-badge {
+            font-size: 0.6rem;
+            font-weight: 700;
+            margin-top: 1px;
+        }
+
+        /* 无活动的填充格 */
+        .calendar-cell.empty {
+            background: transparent;
+            border-color: transparent;
+        }
+
+        /* 有复习活动 */
+        .calendar-cell.has-activity {
+            background: rgba(126,200,227,0.22);
+            border-color: rgba(126,200,227,0.4);
+        }
+        .calendar-cell.has-activity .date-number { color: #1e3a5f; }
+        .calendar-cell.has-activity .review-badge { color: #5ba8d0; }
+
+        /* 当日完成30词 */
+        .calendar-cell.completed {
+            background: linear-gradient(135deg, rgba(126,200,227,0.45) 0%, rgba(91,168,208,0.45) 100%);
+            border-color: #5ba8d0;
+        }
+        .calendar-cell.completed .date-number { color: #1e1b4b; }
+        .calendar-cell.completed .review-badge { color: #312e81; }
+
+        /* 今日高亮 */
+        .calendar-cell.today {
+            border-color: #312e81;
+            box-shadow: 0 0 0 2px rgba(49,46,129,0.2);
+        }
+        .calendar-cell.today .date-number { color: #312e81; }
 
 /* ========== 阅读页面 ========== */
 
@@ -971,6 +1184,22 @@
     overflow: hidden;
     text-overflow: ellipsis;
 }
+
+/* 折叠箭头 */
+.toc-arrow {
+    display: inline-block;
+    width: 12px;
+    font-size: 0.55rem;
+    color: #6b7394;
+    flex-shrink: 0;
+    transition: transform 0.15s ease;
+    user-select: none;
+}
+.reader-toc-item.toc-has-children:hover .toc-arrow { color: #7ec8e3; }
+
+/* 子节点容器 */
+.toc-children { overflow: hidden; }
+.toc-children.collapsed { display: none; }
 
 /* TOC 展开标签（侧边栏收起时显示） / TOC expand tab */
 .reader-toc-tab {

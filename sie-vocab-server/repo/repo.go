@@ -252,6 +252,22 @@ func GetDueWordForReview() (*model.WordEntry, int, error) {
 	return nil, 0, fmt.Errorf("单词 %s 未在词族中找到", pickedWord)
 }
 
+// updateDailyStats 更新每日复习快照（INSERT 时记录当日单词总数，后续 UPDATE 仅增量计数）
+func updateDailyStats() {
+	todayExpr := "DATE(DATE_SUB(NOW(), INTERVAL 4 HOUR))"
+	_, err := DB.Exec(`
+		INSERT INTO daily_stats (review_date, word_count, total_words, is_completed)
+		VALUES (` + todayExpr + `, 1, (SELECT COUNT(*) FROM words),
+			LEAST(30, (SELECT COUNT(*) FROM words)) <= 1)
+		ON DUPLICATE KEY UPDATE
+			word_count = word_count + 1,
+			is_completed = (word_count + 1 >= LEAST(30, total_words))
+	`)
+	if err != nil {
+		log.Printf("⚠️ 更新每日快照失败: %v", err)
+	}
+}
+
 // RecordReview 记录复习并更新间隔（每天每词只记一次，每日模式）
 func RecordReview(wordID int) (newCount int, nextDate string, err error) {
 	// 1. INSERT IGNORE 防止同日重复记录
@@ -280,6 +296,9 @@ func RecordReview(wordID int) (newCount int, nextDate string, err error) {
 		}
 		return
 	}
+
+	// 本次是该单词今日首次复习 → 更新每日快照表
+	updateDailyStats()
 
 	// 2. 检查是否过期：next_review_date < 今天 → 重置计数（遗忘惩罚）
 	var currentCount int
@@ -394,6 +413,109 @@ func GetRandomWordForFreeReview() (*model.WordEntry, int, error) {
 func RecordFreeReview(wordID int) error {
 	_, err := DB.Exec("INSERT INTO free_review_logs (word_id) VALUES (?)", wordID)
 	return err
+}
+
+// ---------- 总览 ----------
+
+// GetMonthOverview returns overview statistics for a given month.
+func GetMonthOverview(year, month int) (*model.OverviewResponse, error) {
+	resp := &model.OverviewResponse{
+		Year:        year,
+		Month:       month,
+		MonthlyData: []model.DayOverview{},
+	}
+
+	// Total words (current count, for display)
+	if err := DB.QueryRow("SELECT COUNT(*) FROM words").Scan(&resp.TotalWords); err != nil {
+		return nil, err
+	}
+
+	// Total reviews (daily mode only)
+	if err := DB.QueryRow("SELECT COUNT(*) FROM review_logs").Scan(&resp.TotalReviews); err != nil {
+		return nil, err
+	}
+
+	// Today's review count (4AM boundary)
+	todayExpr := "DATE(DATE_SUB(NOW(), INTERVAL 4 HOUR))"
+	if err := DB.QueryRow("SELECT COUNT(*) FROM review_logs WHERE review_date = " + todayExpr).Scan(&resp.TodayReviewed); err != nil {
+		return nil, err
+	}
+
+	// Monthly daily breakdown — reads from snapshot table (historically immutable)
+	rows, err := DB.Query(
+		"SELECT review_date, word_count, is_completed FROM daily_stats WHERE YEAR(review_date)=? AND MONTH(review_date)=? ORDER BY review_date",
+		year, month)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var d model.DayOverview
+		var rd string
+		if err := rows.Scan(&rd, &d.ReviewCount, &d.IsCompleted); err != nil {
+			return nil, err
+		}
+		if len(rd) >= 10 {
+			d.Date = rd[:10]
+		} else {
+			d.Date = rd
+		}
+		resp.MonthlyData = append(resp.MonthlyData, d)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	// Streak: consecutive days from most recent review date backwards
+	streakRows, err := DB.Query("SELECT DISTINCT review_date FROM review_logs ORDER BY review_date DESC")
+	if err != nil {
+		return nil, err
+	}
+	defer streakRows.Close()
+
+	var dates []string
+	for streakRows.Next() {
+		var d string
+		if err := streakRows.Scan(&d); err != nil {
+			return nil, err
+		}
+		if len(d) >= 10 {
+			dates = append(dates, d[:10])
+		} else {
+			dates = append(dates, d)
+		}
+	}
+
+	if len(dates) > 0 {
+		// Determine "today" in 4AM terms
+		var todayStr string
+		if err := DB.QueryRow("SELECT " + todayExpr).Scan(&todayStr); err != nil {
+			return nil, err
+		}
+		if len(todayStr) >= 10 {
+			todayStr = todayStr[:10]
+		}
+
+		dateSet := make(map[string]bool, len(dates))
+		for _, d := range dates {
+			dateSet[d] = true
+		}
+
+		// Start streak check from most recent date (dates[0])
+		// If mostRecentDate == today or mostRecentDate == yesterday, count includes it
+		checkDate := dates[0]
+		streak := 0
+		for dateSet[checkDate] {
+			streak++
+			// Move one day back
+			t, _ := time.Parse("2006-01-02", checkDate)
+			checkDate = t.Add(-24 * time.Hour).Format("2006-01-02")
+		}
+		resp.Streak = streak
+	}
+
+	return resp, nil
 }
 
 // SaveWords 批量保存单词

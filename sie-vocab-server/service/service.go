@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"sync"
 	"strings"
 	"time"
 
@@ -245,7 +246,47 @@ func HandleReviewFreeRecord(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// ---------- 总览 ----------
+
+func HandleOverview(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "只接受 POST 请求"})
+		return
+	}
+
+	var req model.OverviewRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		// Default to current month on parse failure
+		now := time.Now()
+		req.Year = now.Year()
+		req.Month = int(now.Month())
+	}
+	if req.Year == 0 {
+		req.Year = time.Now().Year()
+	}
+	if req.Month < 1 || req.Month > 12 {
+		req.Month = int(time.Now().Month())
+	}
+
+	data, err := repo.GetMonthOverview(req.Year, req.Month)
+	if err != nil {
+		log.Printf("❌ 获取总览数据失败: %v", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "获取总览数据失败"})
+		return
+	}
+
+	log.Printf("📊 总览: year=%d month=%d words=%d reviews=%d streak=%d",
+		req.Year, req.Month, data.TotalWords, data.TotalReviews, data.Streak)
+	writeJSON(w, http.StatusOK, data)
+}
+
 // ---------- 教材阅读 ----------
+
+// in-flight request tracker: page → channel that closes when AI completes
+var (
+	readerFlights   = make(map[int]chan struct{})
+	readerFlightsMu sync.Mutex
+)
 
 // HandleReaderChunk returns AI-analyzed content for a single PDF page.
 // If the page ends mid-paragraph, the跨页 paragraph is completed from the next page.
@@ -277,7 +318,30 @@ func HandleReaderChunk(cfg *model.Config) http.HandlerFunc {
 			return
 		}
 
-		// 2. Extract current page text
+	// 2. Deduplicate concurrent requests for the same page
+	readerFlightsMu.Lock()
+	if ch, exists := readerFlights[req.Page]; exists {
+		readerFlightsMu.Unlock()
+		log.Printf("⏳ reader flight wait: page=%d (another request in progress)", req.Page)
+		<-ch
+		if cached2, err2 := repo.GetCachedReaderPage(req.Page); err2 == nil && cached2 != nil {
+			log.Printf("✅ reader 缓存命中 (after wait): page=%d, chunks=%d", req.Page, cached2.TotalChunks)
+			writeJSON(w, http.StatusOK, cached2)
+			return
+		}
+	}
+	ch := make(chan struct{})
+	readerFlights[req.Page] = ch
+	readerFlightsMu.Unlock()
+
+	defer func() {
+		readerFlightsMu.Lock()
+		delete(readerFlights, req.Page)
+		readerFlightsMu.Unlock()
+		close(ch)
+	}()
+
+		// 3. Extract current page text
 		pageText, err := pdf.ExtractPageTextStructured(cfg.SIE_PDFPath, req.Page)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "PDF 提取失败"})
@@ -292,7 +356,7 @@ func HandleReaderChunk(cfg *model.Config) http.HandlerFunc {
 			return
 		}
 
-		// 3. Check if page ends mid-paragraph: no double-newline at end
+		// 4. Check if page ends mid-paragraph: no double-newline at end
 		pageText = strings.TrimSpace(pageText)
 		if needsCrossPageCompletion(pageText) {
 				// Page ends mid-paragraph — fetch next page's first body paragraph
@@ -309,7 +373,7 @@ func HandleReaderChunk(cfg *model.Config) http.HandlerFunc {
 
 			log.Printf("📄 PDF 提取: page=%d, 总长=%d", req.Page, len(pageText))
 
-		// 4. Call DeepSeek
+		// 5. Call DeepSeek
 		reply, err := client.CallDeepSeekWithSystem(cfg.DeepSeekAPIKey, model.ReaderSystemPrompt, pageText)
 		if err != nil {
 			log.Printf("❌ DeepSeek 调用失败: %v", err)
@@ -317,7 +381,7 @@ func HandleReaderChunk(cfg *model.Config) http.HandlerFunc {
 			return
 		}
 
-		// 5. Parse response
+		// 6. Parse response
 		result, err := parseReaderReply(reply)
 		if err != nil {
 			log.Printf("❌ 解析 DeepSeek 回复失败: %v\n原始回复: %.200s", err, reply)
@@ -332,12 +396,10 @@ func HandleReaderChunk(cfg *model.Config) http.HandlerFunc {
 		result.PageEnd = req.Page + 1
 		result.TotalChunks = len(result.Chunks)
 
-		// 6. Cache
-		go func() {
-			if err := repo.SaveCachedReaderPage(req.Page, result.Section, pageText, result); err != nil {
-				log.Printf("❌ 保存 reader_cache 失败: %v", err)
-			}
-		}()
+		// 7. Cache — synchronous to prevent concurrent duplicate AI calls
+		if err := repo.SaveCachedReaderPage(req.Page, result.Section, pageText, result); err != nil {
+			log.Printf("❌ 保存 reader_cache 失败: %v", err)
+		}
 
 		log.Printf("✅ reader 分析完成: page=%d section=%q chunks=%d", req.Page, result.Section, result.TotalChunks)
 		writeJSON(w, http.StatusOK, result)

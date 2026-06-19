@@ -127,6 +127,29 @@ type ReviewRecordRequest struct {
 	WordID int `json:"word_id"`
 }
 
+// ---------- 总览 ----------
+
+type OverviewRequest struct {
+	Year  int `json:"year"`
+	Month int `json:"month"`
+}
+
+type DayOverview struct {
+	Date        string `json:"date"`
+	ReviewCount int    `json:"review_count"`
+	IsCompleted bool   `json:"is_completed"`
+}
+
+type OverviewResponse struct {
+	TotalWords    int           `json:"total_words"`
+	TotalReviews  int           `json:"total_reviews"`
+	Streak        int           `json:"streak"`
+	TodayReviewed int           `json:"today_reviewed"`
+	MonthlyData   []DayOverview `json:"monthly_data"`
+	Month         int           `json:"month"`
+	Year          int           `json:"year"`
+}
+
 // ---------- JSON 数据模型 ----------
 
 type WordEntry struct {

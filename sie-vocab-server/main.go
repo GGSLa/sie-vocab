@@ -38,6 +38,7 @@ func main() {
 	http.HandleFunc("/api/review/record", service.HandleReviewRecord)
 	http.HandleFunc("/api/review/free/random", service.HandleReviewFreeRandom)
 	http.HandleFunc("/api/review/free/record", service.HandleReviewFreeRecord)
+	http.HandleFunc("/api/review/overview", service.HandleOverview)
 	http.HandleFunc("/api/reader/chunk", service.HandleReaderChunk(cfg))
 	http.HandleFunc("/api/reader/progress", service.HandleReaderProgress(cfg))
 	http.HandleFunc("/api/reader/toc", service.HandleReaderTOC(cfg))
