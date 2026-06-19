@@ -1556,20 +1556,22 @@ h4.reader-heading { font-size: 1.05rem; font-weight: 700; color: #6db3d6; margin
     z-index: 9999;
     left: 0; top: 0;
     width: 100%; height: 100%;
-    background: rgba(0,0,0,0.55);
+    background: rgba(0,0,0,0.65);
     align-items: center;
     justify-content: center;
-    backdrop-filter: blur(4px);
+    backdrop-filter: blur(6px);
 }
 .word-modal-content {
-    background: #fff;
+    background: linear-gradient(160deg, rgba(20,18,50,0.98) 0%, rgba(30,27,75,0.97) 50%, rgba(15,23,41,0.98) 100%);
+    border: 1px solid rgba(126,200,227,0.15);
     border-radius: 18px;
     max-width: 680px;
     width: 92%;
     max-height: 80vh;
     overflow-y: auto;
-    box-shadow: 0 25px 80px rgba(0,0,0,0.4);
+    box-shadow: 0 25px 80px rgba(0,0,0,0.5), 0 0 0 1px rgba(126,200,227,0.08);
     animation: modalIn 0.2s ease;
+    color: #cbd5e1;
 }
 @keyframes modalIn {
     from { opacity: 0; transform: scale(0.95) translateY(10px); }
@@ -1580,36 +1582,132 @@ h4.reader-heading { font-size: 1.05rem; font-weight: 700; color: #6db3d6; margin
     align-items: center;
     justify-content: space-between;
     padding: 18px 24px;
-    border-bottom: 1px solid #e8eaed;
-    background: linear-gradient(135deg, #fafbff, #f0f2ff);
+    border-bottom: 1px solid rgba(126,200,227,0.12);
+    background: linear-gradient(135deg, rgba(30,27,75,0.8), rgba(20,18,50,0.9));
     border-radius: 18px 18px 0 0;
     position: sticky;
     top: 0;
     z-index: 1;
+    backdrop-filter: blur(8px);
 }
 .word-modal-title {
     font-weight: 800;
     font-size: 1.1rem;
-    color: #1e1b4b;
+    color: #7ec8e3;
 }
 .word-modal-close {
     background: none;
     border: none;
     font-size: 1.3rem;
     cursor: pointer;
-    color: #888;
+    color: #64748b;
     padding: 4px 8px;
     border-radius: 6px;
     line-height: 1;
     transition: all 0.2s;
 }
 .word-modal-close:hover {
-    background: #fee2e2;
-    color: #dc2626;
+    background: rgba(220,38,38,0.15);
+    color: #ef4444;
 }
 .word-modal-body {
     padding: 20px 24px 24px;
+    position: relative;
+    min-height: 120px;
 }
+.word-modal-body .review-loading {
+    background: rgba(11,15,25,0.92);
+    color: #7ec8e3;
+}
+
+/* Dark-themed overrides for word cards inside modal */
+.word-modal-body .word-card {
+    background: rgba(15,23,41,0.6);
+    border: 1px solid rgba(126,200,227,0.1);
+    box-shadow: 0 2px 12px rgba(0,0,0,0.2);
+}
+.word-modal-body .word-card:hover { box-shadow: 0 4px 20px rgba(126,200,227,0.1); }
+.word-modal-body .word-header {
+    background: linear-gradient(135deg, rgba(30,27,75,0.5), rgba(20,18,50,0.4));
+    border-bottom: 1px solid rgba(126,200,227,0.08);
+}
+.word-modal-body .word-header .word-name { color: #e2e8f0; }
+.word-modal-body .word-derivation {
+    background: rgba(245,158,11,0.08);
+    border-bottom: 1px solid rgba(245,158,11,0.2);
+    color: #fbbf24;
+}
+.word-modal-body .word-card table th { color: #64748b; }
+.word-modal-body .word-card table td { color: #cbd5e1; }
+.word-modal-body .word-actions {
+    border-top: 1px solid rgba(126,200,227,0.08);
+    background: rgba(15,23,41,0.3);
+}
+.word-modal-body .btn-save {
+    background: transparent;
+    color: #7ec8e3;
+    border-color: #7ec8e3;
+}
+.word-modal-body .btn-save:hover {
+    background: #7ec8e3;
+    color: #0b0f19;
+}
+.word-modal-body .btn-save.saved {
+    background: rgba(16,185,129,0.12);
+    color: #34d399;
+    border-color: #10b981;
+}
+.word-modal-body .cached-notice { color: #94a3b8; }
+.word-modal-body .action-bar {
+    color: #cbd5e1;
+}
+/* Diff compare dark overrides */
+.word-modal-body .diff-compare-box {
+    background: rgba(15,23,41,0.4);
+    border-color: rgba(126,200,227,0.25);
+    box-shadow: 0 2px 12px rgba(0,0,0,0.2);
+}
+.word-modal-body .diff-compare-box-header {
+    background: linear-gradient(135deg, rgba(126,200,227,0.3), rgba(91,155,213,0.25));
+}
+.word-modal-body .diff-panel.old .diff-panel-label {
+    background: rgba(220,38,38,0.12);
+    color: #ef4444;
+    border-bottom-color: rgba(239,68,68,0.3);
+}
+.word-modal-body .diff-panel.new .diff-panel-label {
+    background: rgba(16,185,129,0.12);
+    color: #34d399;
+    border-bottom-color: rgba(16,185,129,0.3);
+}
+.word-modal-body .diff-panel.old .word-card {
+    background: rgba(220,38,38,0.04);
+    opacity: 0.75;
+}
+.word-modal-body .diff-panel.new .word-card {
+    border-left: 3px solid rgba(16,185,129,0.5);
+}
+.word-modal-body .diff-compare-actions {
+    border-top: 1px solid rgba(126,200,227,0.1);
+    background: rgba(15,23,41,0.3);
+}
+.word-modal-body .diff-changed-badge {
+    background: rgba(245,158,11,0.15);
+    color: #fbbf24;
+}
+.word-modal-body .diff-new-badge,
+.word-modal-body .badge-sm {
+    background: rgba(16,185,129,0.15);
+    color: #34d399;
+}
+.word-modal-body .diff-only-old-badge {
+    background: rgba(220,38,38,0.1);
+    color: #ef4444;
+}
+.word-modal-body .example-table tr { border-top-color: rgba(126,200,227,0.08); }
+.word-modal-body .domain-tag.finance { background: rgba(16,185,129,0.15); color: #34d399; }
+.word-modal-body .domain-tag.daily { background: rgba(59,130,246,0.15); color: #60a5fa; }
+.word-modal-body .error-msg { color: #ef4444; }
 
 /* ══════════════════════════════════════════════════════════════
    书架页 / Bookshelf Page

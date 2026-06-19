@@ -600,6 +600,7 @@ function renderLookupCardDiff(oldWords, newWords, saveLabel) {
     const label = saveLabel || '💾 保存新版';
     let html = '<div class="action-bar" style="margin-bottom:12px">';
     html += '<span style="color:#7ec8e3;font-weight:600">📋 新旧对比 / Compare</span>';
+    html += '<button class="btn-save-all" onclick="saveAllLookupWords()">💾 保存全部新结果</button>';
     html += '</div>';
 
     const oldMap = new Map(oldWords.map(w => [w.word, w]));
@@ -688,9 +689,14 @@ function renderLookupCardCached(words) {
     return html;
 }
 
-// Render AI result — shows save buttons
+// Render AI result — shows save-all bar + individual save buttons
 function renderLookupCardNew(words) {
-    return renderLookupCardContent(words, 'new');
+    let html = '<div class="action-bar" style="margin-bottom:12px">';
+    html += '<span style="color:#7ec8e3;font-weight:600">📋 AI 翻译结果</span>';
+    html += '<button class="btn-save-all" onclick="saveAllLookupWords()">💾 保存全部</button>';
+    html += '</div>';
+    html += renderLookupCardContent(words, 'new');
+    return html;
 }
 
 // Common card rendering shared by cached and new modes
@@ -853,6 +859,44 @@ async function saveLookupWord(index, btnEl) {
         btnEl.textContent = data.success ? '已保存' : '失败';
         if (data.success) btnEl.className = 'btn-save saved'; else btnEl.disabled = false;
     } catch (err) { btnEl.textContent = '失败'; btnEl.disabled = false; }
+}
+
+async function saveAllLookupWords() {
+    if (!lookupAIWords || lookupAIWords.length === 0) return;
+    const allBtns = document.querySelectorAll('#word-modal-body .btn-save, #word-modal-body .btn-save-all');
+    allBtns.forEach(b => { b.disabled = true; });
+    const saveAllBtn = document.querySelector('#word-modal-body .btn-save-all');
+    if (saveAllBtn) { saveAllBtn.textContent = '保存中…'; saveAllBtn.disabled = true; }
+
+    try {
+        const res = await fetch('/api/word/save-all', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({words: lookupAIWords})
+        });
+        const data = await res.json();
+        if (data.success) {
+            if (saveAllBtn) { saveAllBtn.textContent = '✅ 全部已保存 (' + data.count + ')'; }
+            // Update all individual save buttons
+            document.querySelectorAll('#word-modal-body .btn-save').forEach(b => {
+                b.textContent = '已保存';
+                b.className = 'btn-save saved';
+                b.disabled = true;
+            });
+            // If diff-vocab mode, also update the original vocab table button
+            if (lookupMode === 'diff-vocab' && lookupVocabBtnEl) {
+                lookupVocabBtnEl.textContent = '已覆盖';
+                lookupVocabBtnEl.className = 'btn-save-small saved';
+                lookupVocabBtnEl = null;
+            }
+        } else {
+            if (saveAllBtn) { saveAllBtn.textContent = '失败'; saveAllBtn.disabled = false; }
+            allBtns.forEach(b => { b.disabled = false; });
+        }
+    } catch (err) {
+        if (saveAllBtn) { saveAllBtn.textContent = '失败'; saveAllBtn.disabled = false; }
+        allBtns.forEach(b => { b.disabled = false; });
+    }
 }
 
 function speakWordInline(el) {
