@@ -2,9 +2,11 @@ package client
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"time"
 
@@ -12,6 +14,12 @@ import (
 )
 
 var httpClient = &http.Client{Timeout: 60 * time.Second}
+var rateLimiter *TokenBucket
+
+// InitRateLimiter 初始化 AI API 限流器
+func InitRateLimiter(rpm, maxConcurrent int) {
+	rateLimiter = NewTokenBucket(rpm, maxConcurrent)
+}
 
 // CallDeepSeek 调用 DeepSeek API 进行单词翻译
 func CallDeepSeek(apiKey, message string) (string, error) {
@@ -20,6 +28,14 @@ func CallDeepSeek(apiKey, message string) (string, error) {
 
 // CallDeepSeekWithSystem 调用 DeepSeek API，使用自定义 system prompt
 func CallDeepSeekWithSystem(apiKey, systemPrompt, message string) (string, error) {
+	// 限流等待
+	if rateLimiter != nil {
+		if err := rateLimiter.Wait(context.Background()); err != nil {
+			return "", fmt.Errorf("限流等待被取消: %v", err)
+		}
+		defer rateLimiter.Done()
+	}
+
 	body := map[string]interface{}{
 		"model": "deepseek-chat",
 		"messages": []map[string]string{
@@ -36,6 +52,7 @@ func CallDeepSeekWithSystem(apiKey, systemPrompt, message string) (string, error
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 
+	log.Printf("🤖 DeepSeek 请求开始 (消息长度=%d)", len(message))
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		return "", err
@@ -65,5 +82,6 @@ func CallDeepSeekWithSystem(apiKey, systemPrompt, message string) (string, error
 		return "", fmt.Errorf("DeepSeek 返回空响应")
 	}
 
+	log.Printf("✅ DeepSeek 请求完成 (响应长度=%d)", len(result.Choices[0].Message.Content))
 	return result.Choices[0].Message.Content, nil
 }

@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>书架 — SIE Vocab</title>
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <link rel="stylesheet" href="/css/style.css?v=38">
+</head>
+<body>
+<div class="wrapper-wide">
+    <!-- 导航栏 -->
+    <nav class="nav-bar">
+        <a href="/" class="nav-link">首页</a>
+        <a href="/review.html" class="nav-link">复习</a>
+        <span class="nav-current">书架</span>
+        <a href="/reader.html" class="nav-link">阅读</a>
+    </nav>
+
+    <div class="header">
+        <h1>📚 我的书架 / My Bookshelf</h1>
+        <p id="bookshelf-subtitle">管理你的 SIE 备考教材</p>
+    </div>
+
+    <!-- 操作栏 -->
+    <div class="bookshelf-toolbar">
+        <button class="btn-upload" onclick="openUploadModal()">📤 上传 PDF</button>
+        <span id="bookshelf-count" class="bookshelf-count"></span>
+    </div>
+
+    <!-- 书籍列表 -->
+    <div id="bookshelf-grid" class="bookshelf-grid">
+        <div class="review-loading">加载中…</div>
+    </div>
+
+    <!-- 空状态 -->
+    <div id="bookshelf-empty" class="bookshelf-empty" style="display:none;">
+        <div class="all-done-icon">📭</div>
+        <div class="all-done-title">书架空空如也 / No Books Yet</div>
+        <div class="all-done-sub">点击「上传 PDF」添加你的第一本教材</div>
+    </div>
+
+    <!-- 错误状态 -->
+    <div id="bookshelf-error" class="bookshelf-error" style="display:none;"></div>
+</div>
+
+<!-- 上传模态框 -->
+<div id="upload-modal" class="word-modal" onclick="closeUploadModal(event)">
+    <div class="word-modal-content upload-modal-content" onclick="event.stopPropagation()">
+        <div class="word-modal-header">
+            <span class="word-modal-title">📤 上传新教材 / Upload PDF</span>
+            <button class="word-modal-close" onclick="closeUploadModal()">✕</button>
+        </div>
+        <div class="word-modal-body">
+            <form id="upload-form" onsubmit="uploadBook(event)">
+                <div class="upload-field">
+                    <label class="upload-label">书名 / Title</label>
+                    <input type="text" id="upload-title" class="upload-input" placeholder="如：SIE 官方教材 2026" required>
+                </div>
+                <div class="upload-field">
+                    <label class="upload-label">作者 / Author</label>
+                    <input type="text" id="upload-author" class="upload-input" placeholder="如：FINRA">
+                </div>
+                <div class="upload-field">
+                    <label class="upload-label">描述 / Description</label>
+                    <input type="text" id="upload-desc" class="upload-input" placeholder="如：Securities Industry Essentials 考试教材">
+                </div>
+                <div class="upload-field">
+                    <label class="upload-label">OCR 语言 / OCR Language</label>
+                    <select id="upload-ocr" class="upload-input">
+                        <option value="eng">English (eng)</option>
+                        <option value="chi_sim">简体中文 (chi_sim)</option>
+                        <option value="chi_sim+eng">中英混合 (chi_sim+eng)</option>
+                        <option value="jpn">日本語 (jpn)</option>
+                    </select>
+                </div>
+                <div class="upload-field">
+                    <label class="upload-label">PDF 文件 / File</label>
+                    <div class="upload-dropzone" id="upload-dropzone" onclick="document.getElementById('upload-file').click()">
+                        <span id="dropzone-text">📁 点击选择文件 或拖拽到此处 / Click or drag PDF here</span>
+                        <input type="file" id="upload-file" accept=".pdf,application/pdf" required
+                               onchange="updateDropzoneLabel()" style="display:none;">
+                    </div>
+                </div>
+                <div class="upload-actions">
+                    <button type="button" class="btn-cancel" onclick="closeUploadModal()">取消</button>
+                    <button type="submit" class="btn-submit" id="btn-upload-submit">📤 上传</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script src="/js/bookshelf.js?v=1"></script>
+</body>
+</html>

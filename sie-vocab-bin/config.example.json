@@ -9,5 +9,9 @@
     "database": "sie_vocab"
   },
   "sie_pdf_path": "/path/to/SIE.pdf",
-  "sie_progress_path": "/path/to/sie-progress.json"
+  "sie_progress_path": "/path/to/sie-progress.json",
+  "ocr_language": "eng",
+  "upload_dir": "/path/to/uploads",
+  "deepseek_rpm": 10,
+  "deepseek_max_concurrent": 3
 }

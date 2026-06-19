@@ -10,6 +10,7 @@ import (
 
 	"gorm.io/gorm"
 
+	"sie-vocab-server/client"
 	"sie-vocab-server/logic"
 	"sie-vocab-server/model"
 	"sie-vocab-server/repo"
@@ -30,6 +31,10 @@ func main() {
 	defer sqlDB.Close()
 	log.Println("✅ 数据库连接成功")
 
+	// 初始化 AI 限流器
+	client.InitRateLimiter(cfg.DeepSeekRPM, cfg.DeepSeekMaxConcurrent)
+	log.Printf("⏱️ AI 限流: %d RPM / %d 并发", cfg.DeepSeekRPM, cfg.DeepSeekMaxConcurrent)
+
 	// ── Repo 层 ──
 	wordRepo := repo.NewWordRepo(db)
 	meaningRepo := repo.NewMeaningRepo(db)
@@ -39,6 +44,8 @@ func main() {
 	dailyStatsRepo := repo.NewDailyStatsRepo(db)
 	readerCacheRepo := repo.NewReaderCacheRepo(db)
 	familyRepo := repo.NewWordFamilyRepo(db)
+	bookRepo := repo.NewBookRepo(db)
+	progressRepo := repo.NewReaderProgressRepo(db)
 
 	// ── Logic 层 ──
 	chatHandler := logic.NewChatHandler(cfg.DeepSeekAPIKey)
@@ -50,10 +57,11 @@ func main() {
 	reviewFreeRandomHandler := logic.NewReviewFreeRandomHandler(familyRepo)
 	reviewFreeRecordHandler := logic.NewReviewFreeRecordHandler(familyRepo, freeReviewLogRepo)
 	overviewHandler := logic.NewOverviewHandler(familyRepo)
-	readerChunkHandler := logic.NewReaderChunkHandler(cfg.DeepSeekAPIKey, cfg.SIE_PDFPath, readerCacheRepo)
-	readerProgressHandler := logic.NewReaderProgressHandler(cfg.SIE_ProgressPath)
-	readerTOCHandler := logic.NewReaderTOCHandler(cfg.SIE_PDFPath, readerCacheRepo)
-	readerPageImageHandler := logic.NewReaderPageImageHandler(cfg.SIE_PDFPath)
+	readerChunkHandler := logic.NewReaderChunkHandler(cfg.DeepSeekAPIKey, bookRepo, readerCacheRepo)
+	readerProgressHandler := logic.NewReaderProgressHandler(progressRepo)
+	readerTOCHandler := logic.NewReaderTOCHandler(bookRepo, readerCacheRepo)
+	readerPageImageHandler := logic.NewReaderPageImageHandler(bookRepo)
+	bookshelfHandler := logic.NewBookshelfHandler(bookRepo, progressRepo, readerCacheRepo, cfg.UploadDir, cfg.OCRLanguage)
 
 	// 消除未使用变量警告（部分 repo 待后续使用）
 	_ = wordRepo
@@ -79,6 +87,26 @@ func main() {
 	http.HandleFunc("/api/reader/progress", service.HandleReaderProgress(readerProgressHandler))
 	http.HandleFunc("/api/reader/toc", service.HandleReaderTOC(readerTOCHandler))
 	http.HandleFunc("/api/reader/page-image", service.HandleReaderPageImage(readerPageImageHandler))
+
+	// 书架
+	http.HandleFunc("/api/books", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			if r.URL.Query().Get("id") != "" {
+				service.HandleBookshelfGetSingle(bookshelfHandler)(w, r)
+			} else {
+				service.HandleBookshelfList(bookshelfHandler)(w, r)
+			}
+		case http.MethodPost:
+			service.HandleBookshelfCreate(bookshelfHandler)(w, r)
+		case http.MethodDelete:
+			service.HandleBookshelfDelete(bookshelfHandler)(w, r)
+		default:
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			json.NewEncoder(w).Encode(map[string]string{"error": "不支持的请求方法"})
+		}
+	})
 
 	// 静态文件（禁用缓存）
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -127,6 +155,18 @@ func loadConfig() (*model.Config, error) {
 	}
 	if cfg.SIE_ProgressPath == "" {
 		cfg.SIE_ProgressPath = filepath.Join(filepath.Dir(exePath), "sie-progress.json")
+	}
+	if cfg.OCRLanguage == "" {
+		cfg.OCRLanguage = "eng"
+	}
+	if cfg.UploadDir == "" {
+		cfg.UploadDir = filepath.Join(filepath.Dir(exePath), "..", "uploads")
+	}
+	if cfg.DeepSeekRPM <= 0 {
+		cfg.DeepSeekRPM = 10
+	}
+	if cfg.DeepSeekMaxConcurrent <= 0 {
+		cfg.DeepSeekMaxConcurrent = 3
 	}
 	return &cfg, nil
 }

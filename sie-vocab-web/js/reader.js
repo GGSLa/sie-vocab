@@ -1,4 +1,6 @@
 // SIE Reader — 按原PDF页划分，跨页段落自动补齐
+let currentBookId = 1;
+let currentBookTitle = '';
 let currentPage = 67;
 let currentChunkIndex = 0;
 let pageData = null;
@@ -24,35 +26,61 @@ window.addEventListener('DOMContentLoaded', () => { loadProgress(); loadToc(); }
 async function loadProgress() {
     showLoading('正在加载进度…');
     try {
-        // Check URL param for shared page link (e.g. ?page=100)
+        // Check URL params for book and page (e.g. ?book=1&page=100)
         const urlParams = new URLSearchParams(window.location.search);
         const urlPage = parseInt(urlParams.get('page'));
+        const urlBook = parseInt(urlParams.get('book'));
+
+        if (urlBook && urlBook > 0) {
+            currentBookId = urlBook;
+        }
 
         if (urlPage && urlPage > 0) {
             // Shared link — override saved progress
             currentPage = urlPage;
             currentChunkIndex = 0;
         } else {
-            const res = await fetch('/api/reader/progress');
+            const res = await fetch('/api/reader/progress?book=' + currentBookId);
             const data = await res.json();
             currentPage = data.current_page || 67;
             currentChunkIndex = data.current_chunk || 0;
+            currentBookId = data.book_id || currentBookId;
             document.getElementById('reader-subtitle').textContent =
                 data.current_section || 'SIE 考试教材';
         }
+        // Load book info for title display
+        loadBookInfo();
         await fetchPage(currentPage);
     } catch (err) {
         showError('加载进度失败: ' + esc(err.message));
     }
 }
 
+async function loadBookInfo() {
+    try {
+        const res = await fetch('/api/books?id=' + currentBookId);
+        const data = await res.json();
+        if (data && data.book) {
+            currentBookTitle = data.book.title;
+            document.getElementById('reader-subtitle').textContent = currentBookTitle;
+        } else if (data && data.title) {
+            // Direct book response
+            currentBookTitle = data.title;
+            document.getElementById('reader-subtitle').textContent = currentBookTitle;
+        }
+    } catch (err) {
+        console.error('加载书名失败:', err);
+    }
+}
+
 // Sync browser URL with current page (replaceState, no history push)
 function syncPageURL() {
     const url = new URL(window.location);
+    url.searchParams.set('book', currentBookId);
     if (url.searchParams.get('page') != currentPage) {
         url.searchParams.set('page', currentPage);
-        window.history.replaceState(null, '', url.toString());
     }
+    window.history.replaceState(null, '', url.toString());
 }
 
 async function saveProgress() {
@@ -61,6 +89,7 @@ async function saveProgress() {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({
+                book_id: currentBookId,
                 current_page: currentPage,
                 current_chunk: currentChunkIndex,
                 section: pageData ? pageData.section : ''
@@ -85,7 +114,7 @@ function toggleToc() {
 
 async function loadToc() {
     try {
-        const res = await fetch('/api/reader/toc');
+        const res = await fetch('/api/reader/toc?book=' + currentBookId);
         const data = await res.json();
         if (data.outline && data.outline.length > 0) {
             // PDF outline available — render hierarchical TOC
@@ -244,7 +273,7 @@ async function fetchPage(page) {
         const res = await fetch('/api/reader/chunk', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({page: page})
+            body: JSON.stringify({book_id: currentBookId, page: page})
         });
         const data = await res.json();
 
@@ -464,7 +493,7 @@ function loadPageImage(page) {
     container.innerHTML =
         '<div class="reader-page-img-wrap">' +
         '<div class="reader-page-img-label">第 ' + page + ' 页</div>' +
-        '<img src="/api/reader/page-image?page=' + page + '&t=' + Date.now() + '" ' +
+        '<img src="/api/reader/page-image?book=' + currentBookId + '&page=' + page + '&t=' + Date.now() + '" ' +
         'alt="PDF Page ' + page + '" onerror="this.parentElement.innerHTML=\'<div class=reader-image-placeholder>图片加载失败</div>\'">' +
         '</div>';
 }

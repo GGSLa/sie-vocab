@@ -1,62 +1,39 @@
 package logic
 
 import (
-	"encoding/json"
-	"os"
 	"time"
 
 	"sie-vocab-server/model"
+	"sie-vocab-server/repo"
 )
 
-// ReaderProgressHandler 阅读进度加载/保存业务编排
+// ReaderProgressHandler 阅读进度加载/保存业务编排（DB 持久化）
 type ReaderProgressHandler struct {
-	progressPath string
+	progressRepo *repo.ReaderProgressRepo
 }
 
 // NewReaderProgressHandler 创建 ReaderProgressHandler
-func NewReaderProgressHandler(progressPath string) *ReaderProgressHandler {
-	return &ReaderProgressHandler{progressPath: progressPath}
+func NewReaderProgressHandler(progressRepo *repo.ReaderProgressRepo) *ReaderProgressHandler {
+	return &ReaderProgressHandler{progressRepo: progressRepo}
 }
 
-// Load 加载阅读进度（文件不存在时返回默认值）
-func (h *ReaderProgressHandler) Load() *model.ReaderProgress {
-	data, err := os.ReadFile(h.progressPath)
+// Load 从 DB 加载阅读进度（无记录时返回默认值）
+func (h *ReaderProgressHandler) Load(bookID int) (*model.ReaderProgress, error) {
+	return h.progressRepo.Load(bookID)
+}
+
+// Save 保存阅读进度到 DB
+func (h *ReaderProgressHandler) Save(bookID, currentPage, currentChunk int, section string) error {
+	p, err := h.progressRepo.Load(bookID)
 	if err != nil {
-		return defaultProgress()
+		return err
 	}
-	var p model.ReaderProgress
-	if err := json.Unmarshal(data, &p); err != nil {
-		return defaultProgress()
-	}
-	return &p
-}
-
-// Save 保存阅读进度
-func (h *ReaderProgressHandler) Save(currentPage, currentChunk int, section string) error {
-	p := h.Load()
+	p.BookID = bookID
 	p.CurrentPage = currentPage
 	p.CurrentChunk = currentChunk
 	if section != "" {
 		p.CurrentSection = section
 	}
 	p.LastRead = time.Now().Format("2006-01-02")
-	return h.write(p)
-}
-
-func (h *ReaderProgressHandler) write(p *model.ReaderProgress) error {
-	data, err := json.MarshalIndent(p, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(h.progressPath, data, 0644)
-}
-
-func defaultProgress() *model.ReaderProgress {
-	return &model.ReaderProgress{
-		CurrentPage:      67,
-		CurrentChunk:     0,
-		CurrentSection:   "Chapter 5: Securities Underwriting",
-		CompletedSections: []string{},
-		LastRead:         time.Now().Format("2006-01-02"),
-	}
+	return h.progressRepo.Save(bookID, p)
 }

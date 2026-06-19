@@ -3,6 +3,7 @@ package service
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"strconv"
@@ -20,7 +21,7 @@ func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 	json.NewEncoder(w).Encode(v)
 }
 
-// ---------- AI 翻译 ----------
+// ────────── AI 翻译 ──────────
 
 // HandleChat AI 翻译接口
 func HandleChat(h *logic.ChatHandler) http.HandlerFunc {
@@ -50,7 +51,7 @@ func HandleChat(h *logic.ChatHandler) http.HandlerFunc {
 	}
 }
 
-// ---------- 单词 ----------
+// ────────── 单词 ──────────
 
 // HandleWordQuery 查询单词族
 func HandleWordQuery(h *logic.WordQueryHandler) http.HandlerFunc {
@@ -124,7 +125,7 @@ func HandleWordSaveAll(h *logic.WordSaveAllHandler) http.HandlerFunc {
 	}
 }
 
-// ---------- 复习 — 每日模式 ----------
+// ────────── 复习 — 每日模式 ──────────
 
 // HandleReviewRandom 每日模式随机抽词
 func HandleReviewRandom(h *logic.ReviewRandomHandler) http.HandlerFunc {
@@ -176,7 +177,7 @@ func HandleReviewRecord(h *logic.ReviewRecordHandler) http.HandlerFunc {
 	}
 }
 
-// ---------- 复习 — 自由模式 ----------
+// ────────── 复习 — 自由模式 ──────────
 
 // HandleReviewFreeRandom 自由模式随机抽词
 func HandleReviewFreeRandom(h *logic.ReviewFreeRandomHandler) http.HandlerFunc {
@@ -225,7 +226,7 @@ func HandleReviewFreeRecord(h *logic.ReviewFreeRecordHandler) http.HandlerFunc {
 	}
 }
 
-// ---------- 总览 ----------
+// ────────── 总览 ──────────
 
 // HandleOverview 月度总览
 func HandleOverview(h *logic.OverviewHandler) http.HandlerFunc {
@@ -258,7 +259,7 @@ func HandleOverview(h *logic.OverviewHandler) http.HandlerFunc {
 	}
 }
 
-// ---------- 教材阅读 ----------
+// ────────── 教材阅读 ──────────
 
 // HandleReaderChunk 阅读页 AI 分析
 func HandleReaderChunk(h *logic.ReaderChunkHandler) http.HandlerFunc {
@@ -267,14 +268,15 @@ func HandleReaderChunk(h *logic.ReaderChunkHandler) http.HandlerFunc {
 			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "只接受 POST 请求"})
 			return
 		}
-		var req struct {
-			Page int `json:"page"`
-		}
+		var req model.ReaderChunkRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Page <= 0 {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "page 参数无效"})
 			return
 		}
-		result, err := h.GetChunk(req.Page)
+		if req.BookID <= 0 {
+			req.BookID = 1
+		}
+		result, err := h.GetChunk(req.BookID, req.Page)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
@@ -286,16 +288,33 @@ func HandleReaderChunk(h *logic.ReaderChunkHandler) http.HandlerFunc {
 // HandleReaderProgress 阅读进度（GET 加载 / POST 保存）
 func HandleReaderProgress(h *logic.ReaderProgressHandler) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// 提取 book_id（query param 或 body，默认 1）
+		getBookID := func() int {
+			if idStr := r.URL.Query().Get("book"); idStr != "" {
+				if id, err := strconv.Atoi(idStr); err == nil && id > 0 {
+					return id
+				}
+			}
+			return 1
+		}
 		switch r.Method {
 		case http.MethodGet:
-			writeJSON(w, http.StatusOK, h.Load())
+			progress, err := h.Load(getBookID())
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "加载进度失败"})
+				return
+			}
+			writeJSON(w, http.StatusOK, progress)
 		case http.MethodPost:
 			var req model.SaveProgressRequest
 			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "请求格式错误"})
 				return
 			}
-			if err := h.Save(req.CurrentPage, req.CurrentChunk, req.Section); err != nil {
+			if req.BookID <= 0 {
+				req.BookID = 1
+			}
+			if err := h.Save(req.BookID, req.CurrentPage, req.CurrentChunk, req.Section); err != nil {
 				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "保存进度失败"})
 				return
 			}
@@ -313,7 +332,13 @@ func HandleReaderTOC(h *logic.ReaderTOCHandler) http.HandlerFunc {
 			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "只接受 GET 请求"})
 			return
 		}
-		result, err := h.GetTOC()
+		bookID := 1
+		if idStr := r.URL.Query().Get("book"); idStr != "" {
+			if id, err := strconv.Atoi(idStr); err == nil && id > 0 {
+				bookID = id
+			}
+		}
+		result, err := h.GetTOC(bookID)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "获取目录失败"})
 			return
@@ -339,7 +364,13 @@ func HandleReaderPageImage(h *logic.ReaderPageImageHandler) http.HandlerFunc {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "page 参数无效"})
 			return
 		}
-		data, err := h.GetPageImage(page)
+		bookID := 1
+		if idStr := r.URL.Query().Get("book"); idStr != "" {
+			if id, err := strconv.Atoi(idStr); err == nil && id > 0 {
+				bookID = id
+			}
+		}
+		data, err := h.GetPageImage(bookID, page)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "PDF 渲染失败"})
 			return
@@ -347,5 +378,123 @@ func HandleReaderPageImage(h *logic.ReaderPageImageHandler) http.HandlerFunc {
 		w.Header().Set("Content-Type", "image/png")
 		w.Header().Set("Cache-Control", "public, max-age=86400")
 		w.Write(data)
+	}
+}
+
+// ────────── 书架 ──────────
+
+// HandleBookshelfList 书架列表
+func HandleBookshelfList(h *logic.BookshelfHandler) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "只接受 GET 请求"})
+			return
+		}
+		result, err := h.List()
+		if err != nil {
+			log.Printf("❌ 获取书架列表失败: %v", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "获取书架列表失败"})
+			return
+		}
+		writeJSON(w, http.StatusOK, result)
+	}
+}
+
+// HandleBookshelfGetSingle 获取单本书（含阅读进度）
+func HandleBookshelfGetSingle(h *logic.BookshelfHandler) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "只接受 GET 请求"})
+			return
+		}
+		idStr := r.URL.Query().Get("id")
+		if idStr == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "id 参数必填"})
+			return
+		}
+		id, err := strconv.Atoi(idStr)
+		if err != nil || id <= 0 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "id 参数无效"})
+			return
+		}
+		result, err := h.GetSingle(id)
+		if err != nil {
+			log.Printf("❌ 获取书籍失败 (id=%d): %v", id, err)
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "书籍不存在"})
+			return
+		}
+		writeJSON(w, http.StatusOK, result)
+	}
+}
+
+// HandleBookshelfCreate 上传新书（multipart/form-data）
+func HandleBookshelfCreate(h *logic.BookshelfHandler) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "只接受 POST 请求"})
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, 256<<20)
+		if err := r.ParseMultipartForm(32 << 20); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "文件过大或格式错误"})
+			return
+		}
+
+		title := r.FormValue("title")
+		author := r.FormValue("author")
+		description := r.FormValue("description")
+		ocrLang := r.FormValue("ocr_lang")
+
+		file, _, err := r.FormFile("file")
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "请选择 PDF 文件"})
+			return
+		}
+		defer file.Close()
+
+		pdfData, err := io.ReadAll(file)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "读取文件失败"})
+			return
+		}
+		if len(pdfData) == 0 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "文件为空"})
+			return
+		}
+
+		book, err := h.Create(title, author, description, ocrLang, pdfData)
+		if err != nil {
+			log.Printf("❌ 上传书籍失败: %v", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		log.Printf("📚 新书上架: id=%d title=%q pages=%d", book.ID, book.Title, book.PageCount)
+		writeJSON(w, http.StatusOK, book)
+	}
+}
+
+// HandleBookshelfDelete 删除书籍
+func HandleBookshelfDelete(h *logic.BookshelfHandler) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "只接受 DELETE 请求"})
+			return
+		}
+		idStr := r.URL.Query().Get("id")
+		if idStr == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "id 参数必填"})
+			return
+		}
+		id, err := strconv.Atoi(idStr)
+		if err != nil || id <= 0 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "id 参数无效"})
+			return
+		}
+		if err := h.Delete(id); err != nil {
+			log.Printf("❌ 删除书籍失败 (id=%d): %v", id, err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]bool{"success": true})
 	}
 }

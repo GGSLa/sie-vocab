@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/xml"
 	"fmt"
+	"log"
+	"os"
 	"os/exec"
 	"strings"
 )
@@ -512,6 +514,399 @@ func abs(x int) int {
 		return -x
 	}
 	return x
+}
+
+// ---------- OCR fallback for scanned/image-based PDF pages ----------
+
+const ocrCacheDir = "/tmp/sie-ocr-cache"
+
+// ExtractPageTextOCR extracts text from a scanned/image-based PDF page
+// using pdftoppm to render the page as PNG, then tesseract to OCR it.
+// The rendered PNG is cached to disk to avoid re-rendering on retry.
+// lang specifies the Tesseract language code(s), e.g. "eng", "chi_sim", "chi_sim+eng".
+func ExtractPageTextOCR(pdfPath string, page int, lang string) (string, error) {
+	if lang == "" {
+		lang = "eng"
+	}
+	os.MkdirAll(ocrCacheDir, 0755)
+	imagePath := fmt.Sprintf("%s/page-%d.png", ocrCacheDir, page)
+
+	// Render page to PNG if not cached (pdftoppm always works, even for scanned PDFs)
+	if _, err := os.Stat(imagePath); os.IsNotExist(err) {
+		tmpPrefix := fmt.Sprintf("%s/tmp-%d", ocrCacheDir, page)
+		cmd := exec.Command("pdftoppm",
+			"-png", "-r", "150",
+			"-f", fmt.Sprintf("%d", page),
+			"-l", fmt.Sprintf("%d", page),
+			"-singlefile",
+			pdfPath, tmpPrefix,
+		)
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
+		if err := cmd.Run(); err != nil {
+			log.Printf("❌ OCR: pdftoppm 渲染失败 (page=%d): %v\nstderr: %s", page, err, stderr.String())
+			return "", fmt.Errorf("OCR 渲染失败: %v", err)
+		}
+		os.Rename(tmpPrefix+".png", imagePath)
+	}
+
+	// Run tesseract OCR on the page image
+	cmd := exec.Command("tesseract", imagePath, "stdout", "-l", lang, "--psm", "6")
+	var out bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		log.Printf("❌ OCR: tesseract 失败 (page=%d): %v\nstderr: %s", page, err, stderr.String())
+		return "", fmt.Errorf("OCR 识别失败: %v", err)
+	}
+
+	text := cleanText(out.String())
+	if text == "" {
+		return "", nil
+	}
+
+	// Apply heuristic heading detection for OCR text (no font metadata available)
+	text = addOCRHeadingMarkers(text)
+
+	log.Printf("🔍 OCR 提取: page=%d, chars=%d", page, len(text))
+	return text, nil
+}
+
+// addOCRHeadingMarkers applies lightweight heuristic heading detection to OCR text.
+// Without font metadata, we rely on text patterns:
+//   - All-caps lines that are short (≤ 80 chars) and not just numbers → "## "
+//   - Lines starting with "Chapter", "Part", "Unit", "Section" etc. → "## "
+func addOCRHeadingMarkers(text string) string {
+	lines := strings.Split(text, "\n")
+	var out []string
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			out = append(out, "")
+			continue
+		}
+
+		// Skip lines that are already marked as headings
+		if strings.HasPrefix(trimmed, "#") {
+			out = append(out, trimmed)
+			continue
+		}
+
+		if isOCRHeading(trimmed) {
+			out = append(out, "## "+trimmed)
+		} else {
+			out = append(out, trimmed)
+		}
+	}
+
+	return strings.Join(out, "\n")
+}
+
+// isOCRHeading returns true if the line looks like a heading based on text heuristics.
+func isOCRHeading(line string) bool {
+	// Must be relatively short (headings are rarely > 80 chars)
+	if len(line) > 80 {
+		return false
+	}
+	// Must be at least 3 characters
+	if len(line) < 3 {
+		return false
+	}
+
+	// Pattern 1: Starts with common heading prefixes
+	lowerLine := strings.ToLower(line)
+	for _, prefix := range []string{"chapter", "part ", "unit ", "section", "appendix", "module", "lesson", "topic"} {
+		if strings.HasPrefix(lowerLine, prefix) {
+			return true
+		}
+	}
+
+	// Pattern 2: All-caps line (at least 80% uppercase letters)
+	letterCount := 0
+	upperCount := 0
+	for _, r := range line {
+		if r >= 'A' && r <= 'Z' {
+			upperCount++
+			letterCount++
+		} else if r >= 'a' && r <= 'z' {
+			letterCount++
+		}
+	}
+	if letterCount >= 4 && float64(upperCount)/float64(letterCount) >= 0.8 {
+		return true
+	}
+
+	return false
+}
+
+// ExtractPageTextHybrid extracts text from a PDF page, preferring the existing
+// text layer (pdftohtml structured extraction) and falling back to OCR when
+// the page is image-only (no extractable text elements).
+//
+// This ensures the system works with both text-based and scanned PDFs without
+// requiring any pre-processing.
+func ExtractPageTextHybrid(pdfPath string, page int, lang string) (string, error) {
+	// Try structured text extraction first (gives font metadata for heading detection)
+	text, err := ExtractPageTextStructured(pdfPath, page)
+	if err != nil {
+		// pdftohtml failed entirely — try OCR as fallback
+		log.Printf("⚠️ pdftohtml 失败 (page=%d): %v — 尝试 OCR 回退", page, err)
+		ocrText, ocrErr := ExtractPageTextOCR(pdfPath, page, lang)
+		if ocrErr != nil {
+			return "", ocrErr
+		}
+		return mergeHardWrappedLines(ocrText), nil
+	}
+
+	// If text is empty or nearly empty, this is likely a scanned/image-only page
+	if len(strings.TrimSpace(text)) < 50 {
+		log.Printf("🔍 页面 %d 文字层不足 (%d chars)，启用 OCR 回退...", page, len(text))
+		ocrText, ocrErr := ExtractPageTextOCR(pdfPath, page, lang)
+		if ocrErr != nil {
+			log.Printf("⚠️ OCR 回退也失败 (page=%d): %v — 返回原始文本", page, ocrErr)
+			return text, nil // return whatever little text we got
+		}
+		if ocrText != "" {
+			return mergeHardWrappedLines(ocrText), nil
+		}
+	}
+
+	return mergeHardWrappedLines(text), nil
+}
+
+// mergeHardWrappedLines merges PDF hard-wrapped lines within paragraphs.
+// PDF text extraction often breaks lines mid-sentence where the original
+// layout ran out of horizontal space. This function detects those breaks
+// and joins them, while keeping real paragraph breaks (blank lines),
+// headings (# markers), and callout/sidebar lines (» markers) intact.
+func mergeHardWrappedLines(text string) string {
+	// Split into paragraph blocks (blank-line separated)
+	blocks := strings.Split(text, "\n\n")
+	var resultBlocks []string
+
+	for _, block := range blocks {
+		lines := strings.Split(block, "\n")
+		var merged []string
+		var current string
+
+		for _, rawLine := range lines {
+			line := strings.TrimSpace(rawLine)
+			if line == "" {
+				if current != "" {
+					merged = append(merged, current)
+					current = ""
+				}
+				continue
+			}
+
+			// Always keep heading markers as standalone lines
+			if isHeadingLine(line) {
+				if current != "" {
+					merged = append(merged, current)
+					current = ""
+				}
+				merged = append(merged, line)
+				continue
+			}
+
+			// Callout/sidebar lines: start new callout, merge continuation lines
+			if isCalloutLine(line) {
+				if current != "" {
+					merged = append(merged, current)
+					current = ""
+				}
+				current = line
+				continue
+			}
+
+			// Bullet points and numbered lists — keep standalone
+			if isListItem(line) {
+				if current != "" {
+					merged = append(merged, current)
+					current = ""
+				}
+				merged = append(merged, line)
+				continue
+			}
+
+			// Body text: merge with previous line
+			if current == "" {
+				current = line
+			} else {
+				// Hyphenated word break: merge without space
+				if strings.HasSuffix(current, "-") {
+					current = current[:len(current)-1] + line
+				} else {
+					current += " " + line
+				}
+			}
+		}
+
+		if current != "" {
+			merged = append(merged, current)
+		}
+
+		if len(merged) > 0 {
+			resultBlocks = append(resultBlocks, strings.Join(merged, "\n"))
+		} else {
+			// Preserve intentional blank paragraphs
+			resultBlocks = append(resultBlocks, "")
+		}
+	}
+
+	result := strings.Join(resultBlocks, "\n\n")
+
+	// Second pass: merge paragraph blocks that are clearly continuations.
+	// The structured text extractor may insert false paragraph breaks
+	// when it detects unusual vertical gaps. If a block ends without
+	// sentence-ending punctuation and the next block starts with a
+	// lowercase letter or a common continuation word, merge them.
+	result = mergeFalseParagraphBreaks(result)
+
+	return strings.TrimSpace(result)
+}
+
+// mergeFalseParagraphBreaks does a second pass over paragraph-separated
+// blocks and merges those that are clearly false breaks (mid-sentence).
+func mergeFalseParagraphBreaks(text string) string {
+	blocks := strings.Split(text, "\n\n")
+	if len(blocks) < 2 {
+		return text
+	}
+
+	var merged []string
+	current := blocks[0]
+
+	for i := 1; i < len(blocks); i++ {
+		next := blocks[i]
+
+		// Don't merge if either block is a heading or callout
+		if looksLikeSpecialBlock(current) || looksLikeSpecialBlock(next) {
+			merged = append(merged, current)
+			current = next
+			continue
+		}
+
+		// Merge if the next block looks like a continuation of the current one
+		if isContinuation(current, next) {
+			// Hyphenated word break across blocks
+			if strings.HasSuffix(strings.TrimSpace(current), "-") {
+				current = strings.TrimRight(current, "- \t") + strings.TrimLeft(next, " \t")
+			} else {
+				current += " " + strings.TrimLeft(next, " \t")
+			}
+			continue
+		}
+
+		merged = append(merged, current)
+		current = next
+	}
+
+	merged = append(merged, current)
+	return strings.Join(merged, "\n\n")
+}
+
+// looksLikeSpecialBlock returns true if the block is a heading, callout, or list item.
+func looksLikeSpecialBlock(block string) bool {
+	firstLine := strings.TrimSpace(block)
+	if strings.HasPrefix(firstLine, "#") || strings.HasPrefix(firstLine, "»") {
+		return true
+	}
+	if isListItem(firstLine) {
+		return true
+	}
+	return false
+}
+
+// isContinuation returns true if `next` is a continuation of `prev`.
+// Heuristic: previous block doesn't end with sentence-ending punctuation
+// OR next block starts with lowercase.
+func isContinuation(prev, next string) bool {
+	prev = strings.TrimSpace(prev)
+	next = strings.TrimSpace(next)
+	if prev == "" || next == "" {
+		return false
+	}
+
+	prevLast := prev[len(prev)-1]
+	nextFirst := rune(next[0])
+
+	// If prev ends with sentence-ending punctuation, it's a real break
+	if prevLast == '.' || prevLast == '!' || prevLast == '?' {
+		return false
+	}
+
+	// If prev ends with colon or comma, merge
+	if prevLast == ',' || prevLast == ';' || prevLast == ':' {
+		return true
+	}
+
+	// If next starts with lowercase letter, it's clearly a continuation
+	if nextFirst >= 'a' && nextFirst <= 'z' {
+		return true
+	}
+
+	// If prev ends with hyphen, merge
+	if prevLast == '-' {
+		return true
+	}
+
+	// If prev doesn't end with any punctuation and next starts with
+	// a common lowercase continuation word, merge
+	commonContinuations := []string{"and", "or", "but", "the", "a", "an", "in", "on", "at",
+		"to", "for", "of", "with", "from", "by", "as", "is", "are", "was", "were",
+		"that", "this", "these", "those", "it", "they", "not", "also", "which",
+		"who", "whom", "whose", "can", "may", "will", "shall", "would", "could",
+		"should", "has", "have", "had", "been", "being", "does", "did", "its",
+		"their", "our", "your", "my", "his", "her", "up", "out", "about"}
+	lowerNext := strings.ToLower(next)
+	for _, w := range commonContinuations {
+		if lowerNext == w || strings.HasPrefix(lowerNext, w+" ") {
+			return true
+		}
+	}
+
+	return false
+}
+
+func isHeadingLine(line string) bool {
+	return strings.HasPrefix(line, "#")
+}
+
+func isCalloutLine(line string) bool {
+	return strings.HasPrefix(line, "»")
+}
+
+func isListItem(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	if len(trimmed) < 2 {
+		return false
+	}
+	// Bullet markers
+	if strings.HasPrefix(trimmed, "- ") || strings.HasPrefix(trimmed, "• ") ||
+		strings.HasPrefix(trimmed, "· ") || strings.HasPrefix(trimmed, "– ") {
+		return true
+	}
+	// Numbered list: "1.", "1)", "(1)", "a)", "A.", etc.
+	if len(trimmed) >= 3 {
+		r := []rune(trimmed)
+		// "1. ", "1) ", "a) ", "A. "
+		if (r[0] >= '0' && r[0] <= '9') && (r[1] == '.' || r[1] == ')') && r[2] == ' ' {
+			return true
+		}
+		// "(1) "
+		if r[0] == '(' && (r[1] >= '0' && r[1] <= '9') && r[2] == ')' {
+			return true
+		}
+		// "a) ", "A. "
+		if ((r[0] >= 'a' && r[0] <= 'z') || (r[0] >= 'A' && r[0] <= 'Z')) &&
+			(r[1] == '.' || r[1] == ')') && r[2] == ' ' {
+			return true
+		}
+	}
+	return false
 }
 
 // ---------- PDF outline extraction ----------

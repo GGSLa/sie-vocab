@@ -11,9 +11,13 @@ type MySQLConfig struct {
 
 // Config 应用配置
 type Config struct {
-	DeepSeekAPIKey   string      `json:"deepseek_api_key"`
-	Port             string      `json:"port"`
-	MySQL            MySQLConfig `json:"mysql"`
-	SIE_PDFPath      string      `json:"sie_pdf_path"`
-	SIE_ProgressPath string      `json:"sie_progress_path"`
+	DeepSeekAPIKey        string      `json:"deepseek_api_key"`
+	Port                  string      `json:"port"`
+	MySQL                 MySQLConfig `json:"mysql"`
+	SIE_PDFPath           string      `json:"sie_pdf_path"`
+	SIE_ProgressPath      string      `json:"sie_progress_path"`
+	OCRLanguage           string      `json:"ocr_language"`
+	UploadDir             string      `json:"upload_dir"`
+	DeepSeekRPM           int         `json:"deepseek_rpm"`
+	DeepSeekMaxConcurrent int         `json:"deepseek_max_concurrent"`
 }

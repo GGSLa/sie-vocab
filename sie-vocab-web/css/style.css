@@ -1610,3 +1610,273 @@ h4.reader-heading { font-size: 1.05rem; font-weight: 700; color: #6db3d6; margin
 .word-modal-body {
     padding: 20px 24px 24px;
 }
+
+/* ══════════════════════════════════════════════════════════════
+   书架页 / Bookshelf Page
+   ══════════════════════════════════════════════════════════════ */
+
+.bookshelf-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 24px;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+.bookshelf-count {
+    color: #94a3b8;
+    font-size: 0.9rem;
+}
+
+/* ── 上传按钮 ── */
+.btn-upload {
+    padding: 12px 28px;
+    background: linear-gradient(135deg, #7ec8e3, #5b9bd5);
+    color: #0b0f19;
+    border: none;
+    border-radius: 12px;
+    font-size: 1rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 4px 15px rgba(126, 200, 227, 0.3);
+}
+.btn-upload:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(126, 200, 227, 0.45);
+}
+
+/* ── 书籍卡片网格 ── */
+.bookshelf-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    gap: 20px;
+}
+.book-card {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 16px;
+    padding: 20px 24px;
+    backdrop-filter: blur(10px);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+.book-card:hover {
+    background: rgba(255, 255, 255, 0.07);
+    border-color: rgba(126, 200, 227, 0.3);
+    transform: translateY(-2px);
+    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.3);
+}
+.book-card-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+.book-icon {
+    font-size: 1.5rem;
+    flex-shrink: 0;
+}
+.book-title {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: #e2e8f0;
+    line-height: 1.3;
+    word-break: break-word;
+}
+.book-card-body {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    flex: 1;
+}
+.book-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    font-size: 0.85rem;
+    color: #94a3b8;
+}
+.book-meta span {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+.book-badge {
+    background: rgba(126, 200, 227, 0.15);
+    color: #7ec8e3;
+    padding: 2px 8px;
+    border-radius: 6px;
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+.book-desc {
+    font-size: 0.85rem;
+    color: #64748b;
+    line-height: 1.4;
+}
+.book-date {
+    font-size: 0.78rem;
+    color: #475569;
+}
+.book-card-actions {
+    display: flex;
+    gap: 10px;
+    padding-top: 4px;
+}
+.btn-book-read {
+    flex: 1;
+    padding: 10px 16px;
+    background: linear-gradient(135deg, #7ec8e3, #5b9bd5);
+    color: #0b0f19;
+    border: none;
+    border-radius: 10px;
+    font-size: 0.9rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+.btn-book-read:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(126, 200, 227, 0.35);
+}
+.btn-book-delete {
+    padding: 10px 16px;
+    background: rgba(239, 68, 68, 0.1);
+    color: #ef4444;
+    border: 1px solid rgba(239, 68, 68, 0.2);
+    border-radius: 10px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+.btn-book-delete:hover {
+    background: rgba(239, 68, 68, 0.2);
+    border-color: rgba(239, 68, 68, 0.4);
+}
+
+/* ── 空状态 ── */
+.bookshelf-empty {
+    text-align: center;
+    padding: 60px 20px;
+}
+.bookshelf-error {
+    padding: 20px;
+    text-align: center;
+    font-size: 1rem;
+}
+
+/* ── 上传弹窗 ── */
+.upload-modal-content {
+    max-width: 520px;
+    width: 95%;
+}
+.upload-field {
+    margin-bottom: 16px;
+}
+.upload-label {
+    display: block;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #94a3b8;
+    margin-bottom: 6px;
+}
+.upload-input {
+    width: 100%;
+    padding: 10px 14px;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 10px;
+    color: #e2e8f0;
+    font-size: 0.95rem;
+    font-family: inherit;
+    box-sizing: border-box;
+    transition: border-color 0.2s;
+}
+.upload-input:focus {
+    outline: none;
+    border-color: #7ec8e3;
+    box-shadow: 0 0 0 3px rgba(126, 200, 227, 0.15);
+}
+.upload-input::placeholder {
+    color: #475569;
+}
+select.upload-input {
+    cursor: pointer;
+    appearance: auto;
+}
+.upload-dropzone {
+    border: 2px dashed rgba(255, 255, 255, 0.15);
+    border-radius: 12px;
+    padding: 32px 20px;
+    text-align: center;
+    cursor: pointer;
+    color: #64748b;
+    font-size: 0.9rem;
+    transition: all 0.2s;
+}
+.upload-dropzone:hover,
+.upload-dropzone-active {
+    border-color: #7ec8e3;
+    background: rgba(126, 200, 227, 0.06);
+    color: #94a3b8;
+}
+.upload-actions {
+    display: flex;
+    gap: 12px;
+    justify-content: flex-end;
+    margin-top: 20px;
+}
+.btn-cancel {
+    padding: 10px 20px;
+    background: rgba(255, 255, 255, 0.06);
+    color: #94a3b8;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+.btn-cancel:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+.btn-submit {
+    padding: 10px 24px;
+    background: linear-gradient(135deg, #7ec8e3, #5b9bd5);
+    color: #0b0f19;
+    border: none;
+    border-radius: 10px;
+    font-size: 0.9rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.25s;
+}
+.btn-submit:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(126, 200, 227, 0.35);
+}
+.btn-submit:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+}
+
+/* ── Reader book selector ── */
+.btn-book-select {
+    display: inline-block;
+    padding: 8px 18px;
+    background: rgba(126, 200, 227, 0.1);
+    color: #7ec8e3;
+    border: 1px solid rgba(126, 200, 227, 0.2);
+    border-radius: 10px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    text-decoration: none;
+    transition: all 0.2s;
+}
+.btn-book-select:hover {
+    background: rgba(126, 200, 227, 0.18);
+    border-color: rgba(126, 200, 227, 0.4);
+}

@@ -2,6 +2,7 @@ package model
 
 // ReaderChunkResponse 阅读页 AI 分析响应
 type ReaderChunkResponse struct {
+	BookID      int     `json:"book_id"`
 	Page        int     `json:"page"`
 	PageEnd     int     `json:"page_end"`
 	PageLabel   string  `json:"page_label"`
@@ -35,6 +36,7 @@ type GrammarNote struct {
 
 // ReaderProgress 阅读进度
 type ReaderProgress struct {
+	BookID            int      `json:"book_id"`
 	CurrentPage       int      `json:"current_page"`
 	CurrentChunk      int      `json:"current_chunk"`
 	CurrentSection    string   `json:"current_section"`
@@ -44,7 +46,14 @@ type ReaderProgress struct {
 
 // SaveProgressRequest 保存进度请求
 type SaveProgressRequest struct {
+	BookID       int    `json:"book_id"`
 	CurrentPage  int    `json:"current_page"`
 	CurrentChunk int    `json:"current_chunk"`
 	Section      string `json:"section"`
+}
+
+// ReaderChunkRequest 取 chunk 请求
+type ReaderChunkRequest struct {
+	BookID int `json:"book_id"`
+	Page   int `json:"page"`
 }

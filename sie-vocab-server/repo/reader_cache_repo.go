@@ -10,8 +10,9 @@ import (
 	"sie-vocab-server/model"
 )
 
-// ReaderCache GORM model for reader_cache table
+// ReaderCache GORM model for reader_cache table (composite PK: book_id + page)
 type ReaderCache struct {
+	BookID       int    `gorm:"primaryKey;column:book_id"`
 	Page         int    `gorm:"primaryKey;column:page"`
 	SectionTitle string `gorm:"column:section_title"`
 	RawText      string `gorm:"column:raw_text"`
@@ -37,10 +38,10 @@ func NewReaderCacheRepo(db *gorm.DB) *ReaderCacheRepo {
 	return &ReaderCacheRepo{db: db}
 }
 
-// FindByPage 按页码查找缓存
-func (r *ReaderCacheRepo) FindByPage(page int) (*model.ReaderChunkResponse, error) {
+// FindByPage 按 book_id + 页码查找缓存
+func (r *ReaderCacheRepo) FindByPage(bookID, page int) (*model.ReaderChunkResponse, error) {
 	var c ReaderCache
-	err := r.db.Where("page = ?", page).First(&c).Error
+	err := r.db.Where("book_id = ? AND page = ?", bookID, page).First(&c).Error
 	if err != nil {
 		return nil, err
 	}
@@ -51,27 +52,30 @@ func (r *ReaderCacheRepo) FindByPage(page int) (*model.ReaderChunkResponse, erro
 	return &result, nil
 }
 
-// SavePage 缓存一页的 AI 分析结果（INSERT ON DUPLICATE KEY UPDATE）
-func (r *ReaderCacheRepo) SavePage(page int, sectionTitle, rawText string, response *model.ReaderChunkResponse) error {
+// SavePage 缓存一页的 AI 分析结果（UPSERT on book_id+page）
+func (r *ReaderCacheRepo) SavePage(bookID, page int, sectionTitle, rawText string, response *model.ReaderChunkResponse) error {
+	response.BookID = bookID
 	jsonBytes, _ := json.Marshal(response)
 	c := ReaderCache{
+		BookID:       bookID,
 		Page:         page,
 		SectionTitle: sectionTitle,
 		RawText:      rawText,
 		AIResponse:   string(jsonBytes),
 	}
 	return r.db.Clauses(clause.OnConflict{
-		Columns: []clause.Column{{Name: "page"}},
+		Columns: []clause.Column{{Name: "book_id"}, {Name: "page"}},
 		DoUpdates: clause.AssignmentColumns([]string{
 			"section_title", "raw_text", "ai_response",
 		}),
 	}).Create(&c).Error
 }
 
-// AllCachedPages 获取所有已缓存页面的页码和章节标题
-func (r *ReaderCacheRepo) AllCachedPages() ([]TocEntry, error) {
+// AllCachedPages 获取指定书的所有已缓存页面
+func (r *ReaderCacheRepo) AllCachedPages(bookID int) ([]TocEntry, error) {
 	var entries []TocEntry
 	err := r.db.Model(&ReaderCache{}).
+		Where("book_id = ?", bookID).
 		Select("page, section_title as section").
 		Order("page ASC").
 		Scan(&entries).Error
