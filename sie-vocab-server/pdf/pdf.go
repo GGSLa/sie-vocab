@@ -2,12 +2,14 @@ package pdf
 
 import (
 	"bytes"
+	"context"
 	"encoding/xml"
 	"fmt"
 	"log"
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 // TocItem represents a single entry in the PDF outline (table of contents).
@@ -21,7 +23,9 @@ type TocItem struct {
 // ExtractPageText extracts plain text from a single PDF page using pdftotext.
 // Returns cleaned text with normalized whitespace.
 func ExtractPageText(pdfPath string, page int) (string, error) {
-	cmd := exec.Command("pdftotext",
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "pdftotext",
 		"-f", fmt.Sprintf("%d", page),
 		"-l", fmt.Sprintf("%d", page),
 		"-layout",
@@ -87,7 +91,9 @@ type textLine struct {
 //
 // Body text follows with no prefix. Paragraph breaks are preserved.
 func ExtractPageTextStructured(pdfPath string, page int) (string, error) {
-	cmd := exec.Command("pdftohtml",
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "pdftohtml",
 		"-xml", "-stdout", "-i",
 		"-f", fmt.Sprintf("%d", page),
 		"-l", fmt.Sprintf("%d", page),
@@ -534,7 +540,9 @@ func ExtractPageTextOCR(pdfPath string, page int, lang string) (string, error) {
 	// Render page to PNG if not cached (pdftoppm always works, even for scanned PDFs)
 	if _, err := os.Stat(imagePath); os.IsNotExist(err) {
 		tmpPrefix := fmt.Sprintf("%s/tmp-%d", ocrCacheDir, page)
-		cmd := exec.Command("pdftoppm",
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, "pdftoppm",
 			"-png", "-r", "150",
 			"-f", fmt.Sprintf("%d", page),
 			"-l", fmt.Sprintf("%d", page),
@@ -551,7 +559,9 @@ func ExtractPageTextOCR(pdfPath string, page int, lang string) (string, error) {
 	}
 
 	// Run tesseract OCR on the page image
-	cmd := exec.Command("tesseract", imagePath, "stdout", "-l", lang, "--psm", "6")
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "tesseract", imagePath, "stdout", "-l", lang, "--psm", "6")
 	var out bytes.Buffer
 	var stderr bytes.Buffer
 	cmd.Stdout = &out
@@ -942,7 +952,9 @@ func isJustBulletMarker(line string) bool {
 // ExtractOutline extracts the PDF's built-in outline (bookmarks / table of contents)
 // using pdftohtml -xml and parsing the <outline> section.
 func ExtractOutline(pdfPath string) ([]TocItem, error) {
-	cmd := exec.Command("pdftohtml", "-xml", "-stdout", "-i", pdfPath)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "pdftohtml", "-xml", "-stdout", "-i", pdfPath)
 	var out bytes.Buffer
 	var stderr bytes.Buffer
 	cmd.Stdout = &out

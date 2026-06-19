@@ -1,6 +1,7 @@
 package logic
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -8,10 +9,18 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"sie-vocab-server/model"
 	"sie-vocab-server/repo"
 )
+
+// validOCRLangs OCR 语言码白名单
+var validOCRLangs = map[string]bool{
+	"eng": true, "chi_sim": true, "chi_tra": true,
+	"jpn": true, "kor": true, "fra": true, "deu": true, "spa": true,
+	"chi_sim+eng": true, "chi_tra+eng": true,
+}
 
 // BookshelfHandler 书架管理业务编排
 type BookshelfHandler struct {
@@ -68,6 +77,10 @@ func (h *BookshelfHandler) GetSingle(bookID int) (*model.BookWithProgress, error
 // Create 保存上传的 PDF 并创建书籍记录
 func (h *BookshelfHandler) Create(title, author, description, ocrLang string, pdfData []byte) (*model.Book, error) {
 	if ocrLang == "" {
+		ocrLang = h.defaultOCRLang
+	}
+	if !validOCRLangs[ocrLang] {
+		log.Printf("⚠️ 非法的 OCR 语言: %q，回退到默认值 %q", ocrLang, h.defaultOCRLang)
 		ocrLang = h.defaultOCRLang
 	}
 	if title == "" {
@@ -147,7 +160,9 @@ func (h *BookshelfHandler) Delete(bookID int) error {
 
 // detectPageCount 使用 pdfinfo 检测 PDF 总页数，失败时返回 0
 func detectPageCount(pdfPath string) int {
-	cmd := exec.Command("pdfinfo", pdfPath)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "pdfinfo", pdfPath)
 	out, err := cmd.Output()
 	if err != nil {
 		log.Printf("⚠️ pdfinfo 失败 (path=%s): %v", pdfPath, err)

@@ -2,11 +2,13 @@ package logic
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"time"
 
 	"sie-vocab-server/repo"
 )
@@ -42,7 +44,9 @@ func (h *ReaderPageImageHandler) GetPageImage(bookID, page int) ([]byte, error) 
 	// Render page to PNG using pdftoppm
 	tmpPrefix := filepath.Join(pageImageCacheDir, fmt.Sprintf("tmp-book%d-p%d", bookID, page))
 
-	cmd := exec.Command("pdftoppm",
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "pdftoppm",
 		"-png", "-r", "150",
 		"-f", fmt.Sprintf("%d", page),
 		"-l", fmt.Sprintf("%d", page),

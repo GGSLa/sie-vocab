@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gorm.io/gorm"
 
@@ -73,23 +74,50 @@ func main() {
 	exePath, _ := os.Executable()
 	staticDir := filepath.Join(filepath.Dir(exePath), "..", "sie-vocab-web")
 
-	// ── API 路由 ──
-	http.HandleFunc("/api/chat", service.HandleChat(chatHandler))
-	http.HandleFunc("/api/word/query", service.HandleWordQuery(wordQueryHandler))
-	http.HandleFunc("/api/word/save", service.HandleWordSave(wordSaveHandler))
-	http.HandleFunc("/api/word/save-all", service.HandleWordSaveAll(wordSaveAllHandler))
-	http.HandleFunc("/api/review/random", service.HandleReviewRandom(reviewRandomHandler))
-	http.HandleFunc("/api/review/record", service.HandleReviewRecord(reviewRecordHandler))
-	http.HandleFunc("/api/review/free/random", service.HandleReviewFreeRandom(reviewFreeRandomHandler))
-	http.HandleFunc("/api/review/free/record", service.HandleReviewFreeRecord(reviewFreeRecordHandler))
-	http.HandleFunc("/api/review/overview", service.HandleOverview(overviewHandler))
-	http.HandleFunc("/api/reader/chunk", service.HandleReaderChunk(readerChunkHandler))
-	http.HandleFunc("/api/reader/progress", service.HandleReaderProgress(readerProgressHandler))
-	http.HandleFunc("/api/reader/toc", service.HandleReaderTOC(readerTOCHandler))
-	http.HandleFunc("/api/reader/page-image", service.HandleReaderPageImage(readerPageImageHandler))
+	// ── 安全中间件 ──
+	// withSecurity 添加安全头 + 可选认证
+	withSecurity := func(next http.HandlerFunc) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			// 安全头
+			w.Header().Set("X-Content-Type-Options", "nosniff")
+			w.Header().Set("X-Frame-Options", "DENY")
+			w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+			// 简单 CSP：允许自身资源 + Google Fonts
+			w.Header().Set("Content-Security-Policy",
+				"default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'")
+
+			// 认证检测（仅当配置了 api_token 时生效）
+			if cfg.APIToken != "" {
+				auth := r.Header.Get("Authorization")
+				if !strings.HasPrefix(auth, "Bearer ") || strings.TrimPrefix(auth, "Bearer ") != cfg.APIToken {
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusUnauthorized)
+					json.NewEncoder(w).Encode(map[string]string{"error": "未授权访问"})
+					return
+				}
+			}
+
+			next(w, r)
+		}
+	}
+
+	// ── API 路由（全部经过安全中间件） ──
+	http.HandleFunc("/api/chat", withSecurity(service.HandleChat(chatHandler)))
+	http.HandleFunc("/api/word/query", withSecurity(service.HandleWordQuery(wordQueryHandler)))
+	http.HandleFunc("/api/word/save", withSecurity(service.HandleWordSave(wordSaveHandler)))
+	http.HandleFunc("/api/word/save-all", withSecurity(service.HandleWordSaveAll(wordSaveAllHandler)))
+	http.HandleFunc("/api/review/random", withSecurity(service.HandleReviewRandom(reviewRandomHandler)))
+	http.HandleFunc("/api/review/record", withSecurity(service.HandleReviewRecord(reviewRecordHandler)))
+	http.HandleFunc("/api/review/free/random", withSecurity(service.HandleReviewFreeRandom(reviewFreeRandomHandler)))
+	http.HandleFunc("/api/review/free/record", withSecurity(service.HandleReviewFreeRecord(reviewFreeRecordHandler)))
+	http.HandleFunc("/api/review/overview", withSecurity(service.HandleOverview(overviewHandler)))
+	http.HandleFunc("/api/reader/chunk", withSecurity(service.HandleReaderChunk(readerChunkHandler)))
+	http.HandleFunc("/api/reader/progress", withSecurity(service.HandleReaderProgress(readerProgressHandler)))
+	http.HandleFunc("/api/reader/toc", withSecurity(service.HandleReaderTOC(readerTOCHandler)))
+	http.HandleFunc("/api/reader/page-image", withSecurity(service.HandleReaderPageImage(readerPageImageHandler)))
 
 	// 书架
-	http.HandleFunc("/api/books", func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc("/api/books", withSecurity(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
 			if r.URL.Query().Get("id") != "" {
@@ -106,7 +134,7 @@ func main() {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			json.NewEncoder(w).Encode(map[string]string{"error": "不支持的请求方法"})
 		}
-	})
+	}))
 
 	// 静态文件（禁用缓存）
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {

@@ -2,7 +2,6 @@ package service
 
 import (
 	"encoding/json"
-	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -43,7 +42,7 @@ func HandleChat(h *logic.ChatHandler) http.HandlerFunc {
 		reply, err := h.Chat(req.Message)
 		if err != nil {
 			log.Printf("❌ DeepSeek 调用失败: %v", err)
-			writeJSON(w, http.StatusInternalServerError, model.ChatResponse{Error: fmt.Sprintf("DeepSeek 调用失败: %v", err)})
+			writeJSON(w, http.StatusInternalServerError, model.ChatResponse{Error: "AI 服务异常，请稍后重试"})
 			return
 		}
 		log.Printf("✅ DeepSeek 回复长度: %d 字节", len(reply))
@@ -278,7 +277,8 @@ func HandleReaderChunk(h *logic.ReaderChunkHandler) http.HandlerFunc {
 		}
 		result, err := h.GetChunk(req.BookID, req.Page)
 		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			log.Printf("❌ 获取阅读块失败 (book=%d, page=%d): %v", req.BookID, req.Page, err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "获取阅读内容失败"})
 			return
 		}
 		writeJSON(w, http.StatusOK, result)
@@ -461,11 +461,15 @@ func HandleBookshelfCreate(h *logic.BookshelfHandler) http.HandlerFunc {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "文件为空"})
 			return
 		}
+		if len(pdfData) < 4 || string(pdfData[:4]) != "%PDF" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "文件不是有效的 PDF"})
+			return
+		}
 
 		book, err := h.Create(title, author, description, ocrLang, pdfData)
 		if err != nil {
 			log.Printf("❌ 上传书籍失败: %v", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "上传书籍失败，请稍后重试"})
 			return
 		}
 		log.Printf("📚 新书上架: id=%d title=%q pages=%d", book.ID, book.Title, book.PageCount)
@@ -492,7 +496,7 @@ func HandleBookshelfDelete(h *logic.BookshelfHandler) http.HandlerFunc {
 		}
 		if err := h.Delete(id); err != nil {
 			log.Printf("❌ 删除书籍失败 (id=%d): %v", id, err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "删除书籍失败，请稍后重试"})
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]bool{"success": true})

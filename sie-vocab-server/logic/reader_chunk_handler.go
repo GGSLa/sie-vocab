@@ -6,6 +6,7 @@ import (
 	"log"
 	"strings"
 	"sync"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -74,7 +75,12 @@ func (h *ReaderChunkHandler) GetChunk(bookID, page int) (*model.ReaderChunkRespo
 	if ch, exists := h.flights[key]; exists {
 		h.flightsMu.Unlock()
 		log.Printf("⏳ reader flight wait: book=%d page=%d (another request in progress)", bookID, page)
-		<-ch
+		select {
+		case <-ch:
+		case <-time.After(120 * time.Second):
+			log.Printf("⚠️ reader flight timeout: book=%d page=%d", bookID, page)
+			return nil, fmt.Errorf("请求超时，请稍后重试")
+		}
 		if cached2, err2 := h.cacheRepo.FindByPage(bookID, page); err2 == nil && cached2 != nil {
 			log.Printf("✅ reader 缓存命中 (after wait): book=%d page=%d chunks=%d", bookID, page, cached2.TotalChunks)
 			cached2.BookID = bookID

@@ -13,6 +13,7 @@ type MySQLConfig struct {
 type Config struct {
 	DeepSeekAPIKey        string      `json:"deepseek_api_key"`
 	Port                  string      `json:"port"`
+	APIToken              string      `json:"api_token"` // 可选，设置后 /api/* 需 Bearer 认证
 	MySQL                 MySQLConfig `json:"mysql"`
 	SIE_PDFPath           string      `json:"sie_pdf_path"`
 	SIE_ProgressPath      string      `json:"sie_progress_path"`

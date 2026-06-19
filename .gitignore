@@ -10,3 +10,9 @@ CLAUDE.md
 
 # 大型教材 PDF（不上传 Git）
 *.pdf
+
+# 临时文件
+-.png
+*.jpg
+sie-vocab-bin/config-test.json
+sie-vocab-web/css/style.css.bak
