@@ -278,7 +278,7 @@ func HandleReaderChunk(cfg *model.Config) http.HandlerFunc {
 		}
 
 		// 2. Extract current page text
-		pageText, err := pdf.ExtractPageText(cfg.SIE_PDFPath, req.Page)
+		pageText, err := pdf.ExtractPageTextStructured(cfg.SIE_PDFPath, req.Page)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "PDF 提取失败"})
 			return
@@ -294,21 +294,20 @@ func HandleReaderChunk(cfg *model.Config) http.HandlerFunc {
 
 		// 3. Check if page ends mid-paragraph: no double-newline at end
 		pageText = strings.TrimSpace(pageText)
-		if !strings.HasSuffix(pageText, "\n\n") && pageText != "" {
-			// Page ends mid-paragraph — fetch next page's first paragraph to complete it
-			nextText, err := pdf.ExtractPageText(cfg.SIE_PDFPath, req.Page+1)
-			if err == nil && nextText != "" {
-				nextText = strings.TrimSpace(nextText)
-				// Take only the first paragraph from the next page (up to first double newline)
-				if idx := strings.Index(nextText, "\n\n"); idx > 0 {
-					nextText = nextText[:idx]
+		if needsCrossPageCompletion(pageText) {
+				// Page ends mid-paragraph — fetch next page's first body paragraph
+				nextText, err := pdf.ExtractPageTextStructured(cfg.SIE_PDFPath, req.Page+1)
+				if err == nil && nextText != "" {
+					nextText = strings.TrimSpace(nextText)
+					firstPara := extractFirstBodyParagraph(nextText)
+					if firstPara != "" {
+						pageText += "\n" + firstPara
+						log.Printf("📎 跨页段落补齐: page=%d, 从 page=%d 取了 %d 字", req.Page, req.Page+1, len(firstPara))
+					}
 				}
-				pageText += "\n\n" + nextText
-				log.Printf("📎 跨页段落补齐: page=%d, 从 page=%d 取了 %d 字", req.Page, req.Page+1, len(nextText))
 			}
-		}
 
-		log.Printf("📄 PDF 提取: page=%d, 总长=%d", req.Page, len(pageText))
+			log.Printf("📄 PDF 提取: page=%d, 总长=%d", req.Page, len(pageText))
 
 		// 4. Call DeepSeek
 		reply, err := client.CallDeepSeekWithSystem(cfg.DeepSeekAPIKey, model.ReaderSystemPrompt, pageText)
@@ -486,7 +485,119 @@ func parseReaderReply(reply string) (*model.ReaderChunkResponse, error) {
 	return &result, nil
 }
 
+// HandleReaderTOC returns the PDF outline (from bookmarks) plus cached page numbers.
+func HandleReaderTOC(cfg *model.Config) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "只接受 GET 请求"})
+			return
+		}
+
+		// Get PDF outline (built-in bookmarks)
+		outline, err := pdf.ExtractOutline(cfg.SIE_PDFPath)
+		if err != nil {
+			log.Printf("⚠️ 提取 PDF 大纲失败，回退到缓存页面: %v", err)
+			// Fallback: use cached pages
+			entries, err2 := repo.GetAllCachedPages()
+			if err2 != nil {
+				log.Printf("❌ 获取缓存页面也失败: %v", err2)
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "获取目录失败"})
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]interface{}{
+				"outline":      nil,
+				"entries":      entries,
+				"cached_pages": nil,
+			})
+			return
+		}
+
+		// Get cached page numbers for visual markers
+		entries, _ := repo.GetAllCachedPages()
+		cachedPages := make(map[int]bool)
+		for _, e := range entries {
+			cachedPages[e.Page] = true
+		}
+
+		log.Printf("📑 TOC: %d 大纲条目, %d 已缓存页面", countOutlineItems(outline), len(cachedPages))
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"outline":      outline,
+			"cached_pages": cachedPages,
+		})
+	}
+}
+
+func countOutlineItems(items []pdf.TocItem) int {
+	n := len(items)
+	for _, item := range items {
+		n += countOutlineItems(item.Children)
+	}
+	return n
+}
+
 // ---------- 工具 ----------
+
+// needsCrossPageCompletion checks whether the page text appears to end mid-paragraph.
+// Returns false if the page ends with a heading, sentence-ending punctuation, or blank line.
+func needsCrossPageCompletion(pageText string) bool {
+	if pageText == "" || strings.HasSuffix(pageText, "\n\n") {
+		return false
+	}
+	last := lastLine(pageText)
+	if last == "" || strings.HasPrefix(last, "#") {
+		return false
+	}
+	if isSentenceEnd(last) {
+		return false
+	}
+	return true
+}
+
+// isSentenceEnd returns true if the line ends with sentence-closing punctuation.
+func isSentenceEnd(s string) bool {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return false
+	}
+	last := s[len(s)-1]
+	return last == '.' || last == '!' || last == '?' || last == '"' || last == ')' || last == ':'
+}
+
+// lastLine returns the last non-empty line of text.
+func lastLine(s string) string {
+	lines := strings.Split(strings.TrimSpace(s), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if strings.TrimSpace(lines[i]) != "" {
+			return lines[i]
+		}
+	}
+	return ""
+}
+
+// extractFirstBodyParagraph returns the first body paragraph from structured text,
+// skipping any heading lines (# / ## / ###).
+func extractFirstBodyParagraph(s string) string {
+	lines := strings.Split(s, "\n")
+	var paraLines []string
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			if len(paraLines) > 0 {
+				break // end of first paragraph
+			}
+			continue
+		}
+		// Skip heading lines
+		if strings.HasPrefix(trimmed, "#") {
+			if len(paraLines) > 0 {
+				break // heading after body text ends the paragraph
+			}
+			continue
+		}
+		paraLines = append(paraLines, trimmed)
+	}
+	return strings.Join(paraLines, " ")
+}
 
 func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 	w.Header().Set("Content-Type", "application/json")

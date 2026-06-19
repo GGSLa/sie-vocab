@@ -40,6 +40,7 @@ func main() {
 	http.HandleFunc("/api/review/free/record", service.HandleReviewFreeRecord)
 	http.HandleFunc("/api/reader/chunk", service.HandleReaderChunk(cfg))
 	http.HandleFunc("/api/reader/progress", service.HandleReaderProgress(cfg))
+	http.HandleFunc("/api/reader/toc", service.HandleReaderTOC(cfg))
 	http.HandleFunc("/api/reader/page-image", service.HandleReaderPageImage(cfg))
 
 	// 静态文件（禁用缓存）

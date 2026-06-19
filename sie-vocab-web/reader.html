@@ -7,7 +7,7 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
-    <link rel="stylesheet" href="/css/style.css?v=12">
+    <link rel="stylesheet" href="/css/style.css?v=35">
 </head>
 <body>
 <div class="wrapper-wide">
@@ -38,8 +38,23 @@
     <!-- 进度指示 -->
     <div id="reader-progress" class="reader-progress"></div>
 
-    <!-- 主布局：左侧图片 + 右侧内容 -->
+    <!-- 主布局：目录 + 左侧图片 + 右侧内容 -->
     <div class="reader-layout">
+        <!-- 目录侧边栏（可折叠） -->
+        <div id="reader-toc-sidebar" class="reader-toc-sidebar">
+            <div class="reader-toc-header">
+                <span>📑 目录 / TOC</span>
+                <button class="reader-toc-close" onclick="toggleToc()">✕</button>
+            </div>
+            <div class="reader-toc-list" id="reader-toc-list">
+                <div class="reader-toc-empty">加载中…</div>
+            </div>
+        </div>
+        <!-- 目录展开标签（收起时显示） -->
+        <div id="reader-toc-tab" class="reader-toc-tab" onclick="toggleToc()" title="展开目录">
+            <span>☰</span>
+            <span class="toc-tab-label">目录</span>
+        </div>
         <!-- 左侧：PDF 原页图片 -->
         <div class="reader-left">
             <div class="reader-image-label">PDF 原页</div>
@@ -91,6 +106,14 @@
     </div>
 </div>
 
+<!-- 左右全高翻页按钮 -->
+<div id="nav-edge-left" class="nav-edge" onclick="prevChunk()" title="上一段 / 上一页">
+    <span class="nav-edge-arrow">◂</span>
+</div>
+<div id="nav-edge-right" class="nav-edge nav-edge-right" onclick="nextChunk()" title="下一段 / 下一页">
+    <span class="nav-edge-arrow">▸</span>
+</div>
+
 <!-- 单词查询弹窗 -->
 <div id="word-modal" class="word-modal" onclick="closeModal(event)">
     <div class="word-modal-content" onclick="event.stopPropagation()">
@@ -102,6 +125,6 @@
     </div>
 </div>
 
-<script src="/js/reader.js?v=12"></script>
+<script src="/js/reader.js?v=19"></script>
 </body>
 </html>

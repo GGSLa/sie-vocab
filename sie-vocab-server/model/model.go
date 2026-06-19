@@ -181,8 +181,19 @@ const ReaderSystemPrompt = `你是一个 SIE（Securities Industry Essentials）
   ]
 }
 
+## 标题标记（重要）
+- 输入文本中已经用 Markdown 标题标记标出了原文的各级标题：
+  "# "   = 章节大标题（Page-level chapter title）
+  "## "  = 节标题（Major section heading）
+  "### " = 小节标题（Sub-section heading）
+- **这些标题是原文中字体较大、加粗的真实标题，请在分段时优先以标题为边界**
+- 每个 chunk 应尽量从一个标题开始，到下一个标题前结束
+- 不要把标题和其下的正文分到不同的 chunk 中（标题应和紧随其后的正文在同一个 chunk 里）
+- section 字段应使用输入文本中 "# " 级别标题的文字内容（去掉 # 前缀），如果输入中没有该级别标题，则使用第一个 "## " 标题
+
 ## 分段规则
-- 将输入文本分为 1 到 3 个 chunk，每个 chunk 包含 1 到 3 个自然段落
+- 将输入文本分为 1 到 3 个 chunk，尽量以 "## " 或 "### " 标题为自然边界
+- 每个 chunk 包含 1 到 3 个自然段落
 - 每个 chunk 必须有完整意义，不可在句子中间断开
 - 如果输入文本只有一个有效段落，则只输出 1 个 chunk
 - 每个 chunk 的 vocab 包含 3 到 8 个词汇

@@ -3,13 +3,17 @@ let currentPage = 67;
 let currentChunkIndex = 0;
 let pageData = null;
 let loading = false;
+let tocExpanded = false;
+let tocData = [];          // hierarchical outline
+let tocDataFlat = [];      // fallback: flat cached pages
+let tocCachedPages = {};   // page -> bool for cached markers
 
 function esc(s) {
     if (!s) return '';
     return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-window.addEventListener('DOMContentLoaded', () => { loadProgress(); });
+window.addEventListener('DOMContentLoaded', () => { loadProgress(); loadToc(); });
 
 // ============ Progress ============
 
@@ -44,6 +48,112 @@ async function saveProgress() {
     }
 }
 
+// ============ TOC Sidebar ============
+
+function toggleToc() {
+    const sidebar = document.getElementById('reader-toc-sidebar');
+    tocExpanded = !tocExpanded;
+    if (tocExpanded) {
+        sidebar.classList.add('expanded');
+    } else {
+        sidebar.classList.remove('expanded');
+    }
+}
+
+async function loadToc() {
+    try {
+        const res = await fetch('/api/reader/toc');
+        const data = await res.json();
+        if (data.outline && data.outline.length > 0) {
+            // PDF outline available — render hierarchical TOC
+            tocData = data.outline;
+            tocCachedPages = data.cached_pages || {};
+            renderTocOutline();
+        } else if (data.entries) {
+            // Fallback: cached pages list
+            tocDataFlat = data.entries;
+            tocCachedPages = {};
+            renderTocFlat();
+        } else {
+            document.getElementById('reader-toc-list').innerHTML =
+                '<div class="reader-toc-empty">目录数据为空</div>';
+        }
+    } catch (err) {
+        console.error('加载目录失败:', err);
+        document.getElementById('reader-toc-list').innerHTML =
+            '<div class="reader-toc-empty">目录加载失败</div>';
+    }
+}
+
+function renderTocOutline() {
+    const list = document.getElementById('reader-toc-list');
+    let html = renderTocItems(tocData, 0);
+    list.innerHTML = html || '<div class="reader-toc-empty">无目录条目</div>';
+    highlightTocPage();
+}
+
+function renderTocItems(items, depth) {
+    if (!items || items.length === 0) return '';
+    let html = '';
+    items.forEach(e => {
+        let cls = 'reader-toc-item';
+        if (e.level <= 0) cls += ' toc-level-part';
+        else if (e.level === 1) cls += ' toc-level-chapter';
+        else cls += ' toc-level-section';
+        if (tocCachedPages && tocCachedPages[e.page]) cls += ' toc-cached';
+
+        html += '<div class="' + cls + '" data-page="' + e.page +
+            '" style="padding-left:' + (16 + depth * 14) + 'px" ' +
+            'onclick="jumpToTocPage(' + e.page + ')">' +
+            '<span class="reader-toc-page-num">P.' + e.page + '</span>' +
+            '<span class="reader-toc-page-title">' + esc(e.title) + '</span>';
+        if (tocCachedPages && tocCachedPages[e.page]) {
+            html += '<span class="toc-dot" title="已读"></span>';
+        }
+        html += '</div>';
+
+        // Render children (subsections)
+        if (e.children && e.children.length > 0) {
+            html += renderTocItems(e.children, depth + 1);
+        }
+    });
+    return html;
+}
+
+function renderTocFlat() {
+    const list = document.getElementById('reader-toc-list');
+    if (!tocDataFlat || tocDataFlat.length === 0) {
+        list.innerHTML = '<div class="reader-toc-empty">暂无缓存页面 / No cached pages yet</div>';
+        return;
+    }
+    let html = '';
+    let lastSection = '';
+    tocDataFlat.forEach(e => {
+        const section = e.section || '未命名章节';
+        if (section !== lastSection) {
+            html += '<div class="reader-toc-section-label">' + esc(section) + '</div>';
+            lastSection = section;
+        }
+        html += '<div class="reader-toc-item" data-page="' + e.page + '" onclick="jumpToTocPage(' + e.page + ')">' +
+            '<span class="reader-toc-page-num">P.' + e.page + '</span>' +
+            '<span class="reader-toc-page-title">第 ' + e.page + ' 页</span>' +
+            '</div>';
+    });
+    list.innerHTML = html;
+    highlightTocPage();
+}
+
+function highlightTocPage() {
+    document.querySelectorAll('.reader-toc-item').forEach(el => {
+        el.classList.toggle('active', parseInt(el.getAttribute('data-page')) === currentPage);
+    });
+}
+
+function jumpToTocPage(page) {
+    currentChunkIndex = 0;
+    fetchPage(page);
+}
+
 // ============ Page Fetching ============
 
 async function fetchPage(page) {
@@ -55,6 +165,9 @@ async function fetchPage(page) {
     document.getElementById('reader-main').style.display = 'none';
     document.getElementById('reader-actions').style.display = 'none';
 
+    // 立即加载左侧 PDF 图片，不等待右侧 chunk API 返回 / Load PDF image immediately; don't wait for chunk API
+    loadPageImage(page);
+
     try {
         const res = await fetch('/api/reader/chunk', {
             method: 'POST',
@@ -64,6 +177,9 @@ async function fetchPage(page) {
         const data = await res.json();
 
         if (data.error) {
+            // Still update current page so TOC highlight follows
+            currentPage = page;
+            highlightTocPage();
             if (data.error.includes('无文本') || data.error.includes('空白')) {
                 showEmpty(data.error + ' — 点击"下一页"继续');
             } else {
@@ -78,13 +194,15 @@ async function fetchPage(page) {
         if (currentChunkIndex >= data.chunks.length) {
             currentChunkIndex = 0;
         }
-        loadPageImage(page);
         renderChunk();
         updatePageNav();
+        highlightTocPage();
         document.getElementById('reader-main').style.display = 'block';
         document.getElementById('reader-actions').style.display = 'block';
         document.getElementById('reader-subtitle').textContent = data.section || 'SIE 考试教材';
         saveProgress();
+        // Refresh TOC in case a new page was cached
+        loadToc();
     } catch (err) {
         showError('请求失败: ' + esc(err.message));
     } finally {
@@ -124,14 +242,45 @@ function renderChunk() {
 
 function formatText(text) {
     if (!text) return '<p class="empty-note">（无内容）</p>';
-    return text.split(/\n\n+/).map(p => {
-        const trimmed = p.trim();
-        if (!trimmed) return '';
-        const safe = esc(trimmed);
-        const clickable = safe.replace(/\b([a-zA-Z]+(?:'[a-zA-Z]+)?)\b/g,
-            '<span class="word-clickable" data-word="$1" onclick="lookupWord(this)" title="点击查词">$1</span>');
-        return '<p>' + clickable.replace(/\n/g, '<br>') + '</p>';
-    }).join('');
+    // Split into blocks by double newlines
+    const blocks = text.split(/\n\n+/);
+    let html = '';
+    blocks.forEach(block => {
+        const trimmed = block.trim();
+        if (!trimmed) return;
+        // Split block into individual lines
+        const lines = trimmed.split('\n');
+        let blockHTML = '';
+        lines.forEach(line => {
+            const lineTrimmed = line.trim();
+            if (!lineTrimmed) return;
+            const headingMatch = lineTrimmed.match(/^(#{1,3})\s+(.+)$/);
+            // Detect sidebar/callout lines (start with »)
+            if (lineTrimmed.startsWith('»') || lineTrimmed.startsWith('»')) {
+                const safe = esc(lineTrimmed.replace(/^»\s*/, ''));
+                const clickable = safe.replace(/\b([a-zA-Z]+(?:'[a-zA-Z]+)?)\b/g,
+                    '<span class="word-clickable" data-word="$1" onclick="lookupWord(this)" title="点击查词">$1</span>');
+                blockHTML += '<span class="reader-callout-line">» ' + clickable + '</span>';
+            }
+            // Detect heading markers (#, ##, ###)
+            else if (headingMatch) {
+                const level = headingMatch[1].length; // 1, 2, or 3
+                const headingText = esc(headingMatch[2]);
+                // # → h2, ## → h3, ### → h4 (h1 is page-level title)
+                blockHTML += '<h' + (level + 1) + ' class="reader-heading">' + headingText + '</h' + (level + 1) + '>';
+            } else {
+                // Body text line — make words clickable
+                const safe = esc(lineTrimmed);
+                const clickable = safe.replace(/\b([a-zA-Z]+(?:'[a-zA-Z]+)?)\b/g,
+                    '<span class="word-clickable" data-word="$1" onclick="lookupWord(this)" title="点击查词">$1</span>');
+                blockHTML += '<span class="reader-line">' + clickable + '</span>';
+            }
+        });
+        if (blockHTML) {
+            html += '<p>' + blockHTML + '</p>';
+        }
+    });
+    return html || '<p class="empty-note">（无内容）</p>';
 }
 
 function renderVocab(vocab) {
@@ -369,8 +518,13 @@ function showLoading(msg) {
 function hideLoading() { document.getElementById('reader-loading').style.display = 'none'; }
 function showError(msg) {
     const el = document.getElementById('reader-error');
-    el.innerHTML = '<span class="error-msg">' + esc(msg) + '</span>';
+    el.innerHTML = '<div class="error-msg">' + esc(msg) + '</div>' +
+        '<button class="btn-next" onclick="retryCurrentPage()" style="margin-top:16px;">🔄 重试当前页 / Retry</button>';
     el.style.display = 'block';
+}
+function retryCurrentPage() {
+    hideError();
+    fetchPage(currentPage);
 }
 function hideError() { document.getElementById('reader-error').style.display = 'none'; }
 function showEmpty(msg) {
