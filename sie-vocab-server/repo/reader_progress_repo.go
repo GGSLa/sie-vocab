@@ -66,6 +66,19 @@ func (r *ReaderProgressRepo) Load(bookID int) (*model.ReaderProgress, error) {
 	}, nil
 }
 
+// FindLastReadBookID 返回最近阅读的 book_id（按 last_read DESC），无记录返回 0
+func (r *ReaderProgressRepo) FindLastReadBookID() (int, error) {
+	var rp ReaderProgress
+	err := r.db.Order("last_read DESC").First(&rp).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return 0, nil
+		}
+		return 0, err
+	}
+	return rp.BookID, nil
+}
+
 // Save 保存阅读进度（UPSERT）
 func (r *ReaderProgressRepo) Save(bookID int, progress *model.ReaderProgress) error {
 	completedJSON, _ := json.Marshal(progress.CompletedSections)

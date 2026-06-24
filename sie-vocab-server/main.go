@@ -59,7 +59,7 @@ func main() {
 	reviewFreeRecordHandler := logic.NewReviewFreeRecordHandler(familyRepo, freeReviewLogRepo)
 	overviewHandler := logic.NewOverviewHandler(familyRepo)
 	readerChunkHandler := logic.NewReaderChunkHandler(cfg.DeepSeekAPIKey, bookRepo, readerCacheRepo)
-	readerProgressHandler := logic.NewReaderProgressHandler(progressRepo)
+	readerProgressHandler := logic.NewReaderProgressHandler(progressRepo, bookRepo)
 	readerTOCHandler := logic.NewReaderTOCHandler(bookRepo, readerCacheRepo)
 	readerPageImageHandler := logic.NewReaderPageImageHandler(bookRepo)
 	bookshelfHandler := logic.NewBookshelfHandler(bookRepo, progressRepo, readerCacheRepo, cfg.UploadDir, cfg.OCRLanguage)
@@ -112,6 +112,7 @@ func main() {
 	http.HandleFunc("/api/review/free/record", withSecurity(service.HandleReviewFreeRecord(reviewFreeRecordHandler)))
 	http.HandleFunc("/api/review/overview", withSecurity(service.HandleOverview(overviewHandler)))
 	http.HandleFunc("/api/reader/chunk", withSecurity(service.HandleReaderChunk(readerChunkHandler)))
+	http.HandleFunc("/api/reader/last-book", withSecurity(service.HandleReaderDefaultBook(readerProgressHandler)))
 	http.HandleFunc("/api/reader/progress", withSecurity(service.HandleReaderProgress(readerProgressHandler)))
 	http.HandleFunc("/api/reader/toc", withSecurity(service.HandleReaderTOC(readerTOCHandler)))
 	http.HandleFunc("/api/reader/page-image", withSecurity(service.HandleReaderPageImage(readerPageImageHandler)))
@@ -180,9 +181,6 @@ func loadConfig() (*model.Config, error) {
 	}
 	if cfg.SIE_PDFPath == "" {
 		cfg.SIE_PDFPath = filepath.Join(filepath.Dir(exePath), "..", "SIE.pdf")
-	}
-	if cfg.SIE_ProgressPath == "" {
-		cfg.SIE_ProgressPath = filepath.Join(filepath.Dir(exePath), "sie-progress.json")
 	}
 	if cfg.OCRLanguage == "" {
 		cfg.OCRLanguage = "eng"

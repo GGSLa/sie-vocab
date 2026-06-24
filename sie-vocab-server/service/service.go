@@ -285,6 +285,29 @@ func HandleReaderChunk(h *logic.ReaderChunkHandler) http.HandlerFunc {
 	}
 }
 
+// HandleReaderDefaultBook 获取默认书籍（最近阅读 > 第一本 > 无书提示）
+func HandleReaderDefaultBook(h *logic.ReaderProgressHandler) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "只接受 GET 请求"})
+			return
+		}
+		progress, err := h.GetDefaultBook()
+		if err != nil {
+			if err.Error() == "没有书籍" {
+				writeJSON(w, http.StatusOK, map[string]interface{}{
+					"error":    "没有书籍，请先上传 PDF",
+					"no_books": true,
+				})
+				return
+			}
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "获取默认书籍失败"})
+			return
+		}
+		writeJSON(w, http.StatusOK, progress)
+	}
+}
+
 // HandleReaderProgress 阅读进度（GET 加载 / POST 保存）
 func HandleReaderProgress(h *logic.ReaderProgressHandler) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

@@ -19,7 +19,7 @@ function esc(s) {
     return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-window.addEventListener('DOMContentLoaded', () => { loadProgress(); loadToc(); });
+window.addEventListener('DOMContentLoaded', () => { loadProgress(); });
 
 // ============ Progress ============
 
@@ -32,24 +32,35 @@ async function loadProgress() {
         const urlBook = parseInt(urlParams.get('book'));
 
         if (urlBook && urlBook > 0) {
+            // Explicit book in URL — use it directly
             currentBookId = urlBook;
+        } else {
+            // No book specified — ask server for default (last read > first book)
+            const res = await fetch('/api/reader/last-book');
+            const data = await res.json();
+            if (data.no_books) {
+                showNoBooks();
+                return;
+            }
+            currentBookId = data.book_id || 1;
         }
 
         if (urlPage && urlPage > 0) {
-            // Shared link — override saved progress
+            // Shared link — override saved progress with URL page
             currentPage = urlPage;
             currentChunkIndex = 0;
         } else {
             const res = await fetch('/api/reader/progress?book=' + currentBookId);
             const data = await res.json();
-            currentPage = data.current_page || 67;
+            currentPage = data.current_page || 1;
             currentChunkIndex = data.current_chunk || 0;
             currentBookId = data.book_id || currentBookId;
             document.getElementById('reader-subtitle').textContent =
                 data.current_section || 'SIE 考试教材';
         }
-        // Load book info for title display
+        // Load book info and TOC (now after bookId is resolved, fixing race condition)
         loadBookInfo();
+        loadToc();
         await fetchPage(currentPage);
     } catch (err) {
         showError('加载进度失败: ' + esc(err.message));
@@ -970,6 +981,19 @@ function closeModal(event) {
 }
 
 // ============ UI Helpers ============
+
+function showNoBooks() {
+    hideLoading();
+    hideError();
+    hideEmpty();
+    document.getElementById('reader-loading').style.display = 'none';
+    document.getElementById('reader-main').style.display = 'none';
+    document.getElementById('reader-actions').style.display = 'none';
+    document.getElementById('reader-no-books').style.display = 'block';
+    document.getElementById('reader-page-display').textContent = '第 -- 页';
+    document.getElementById('reader-subtitle').textContent = '暂无书籍';
+    document.getElementById('reader-progress').innerHTML = '';
+}
 
 function showLoading(msg) {
     const el = document.getElementById('reader-loading');
