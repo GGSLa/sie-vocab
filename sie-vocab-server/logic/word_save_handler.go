@@ -16,6 +16,6 @@ func NewWordSaveHandler(familyRepo *repo.WordFamilyRepo) *WordSaveHandler {
 }
 
 // Save 保存单个单词
-func (h *WordSaveHandler) Save(entry model.WordEntry) error {
-	return h.familyRepo.SaveWord(entry)
+func (h *WordSaveHandler) Save(entry model.WordEntry, userID int) error {
+	return h.familyRepo.SaveWord(entry, userID)
 }

@@ -16,6 +16,6 @@ func NewWordSaveAllHandler(familyRepo *repo.WordFamilyRepo) *WordSaveAllHandler 
 }
 
 // SaveAll 批量保存单词
-func (h *WordSaveAllHandler) SaveAll(words []model.WordEntry) (int, error) {
-	return h.familyRepo.SaveWords(words)
+func (h *WordSaveAllHandler) SaveAll(words []model.WordEntry, userID int) (int, error) {
+	return h.familyRepo.SaveWords(words, userID)
 }

@@ -16,8 +16,8 @@ func NewReviewFreeRandomHandler(familyRepo *repo.WordFamilyRepo) *ReviewFreeRand
 }
 
 // GetRandom 随机抽取一个单词（无间隔约束）
-func (h *ReviewFreeRandomHandler) GetRandom() (*model.ReviewRandomResponse, error) {
-	entry, wordID, err := h.familyRepo.GetRandomWordForFreeReview()
+func (h *ReviewFreeRandomHandler) GetRandom(userID int) (*model.ReviewRandomResponse, error) {
+	entry, wordID, err := h.familyRepo.GetRandomWordForFreeReview(userID)
 	if err != nil {
 		return nil, err
 	}

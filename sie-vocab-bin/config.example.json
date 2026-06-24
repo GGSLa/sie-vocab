@@ -1,5 +1,6 @@
 {
   "deepseek_api_key": "在这里填写你的 DeepSeek API Key",
+  "jwt_secret": "在这里设置一个随机字符串作为 JWT 密钥（至少32字符）",
   "port": "8080",
   "mysql": {
     "host": "localhost",
@@ -9,7 +10,6 @@
     "database": "sie_vocab"
   },
   "sie_pdf_path": "/path/to/SIE.pdf",
-  "sie_progress_path": "/path/to/sie-progress.json",
   "ocr_language": "eng",
   "upload_dir": "/path/to/uploads",
   "deepseek_rpm": 10,

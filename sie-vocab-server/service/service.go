@@ -13,6 +13,17 @@ import (
 	"sie-vocab-server/logic"
 )
 
+// contextUserID 用于从 context 中提取 userID（字符串键，与 main.go 保持一致）
+const contextUserID = "userID"
+
+// getUserID 从请求 context 中提取认证用户的 ID
+func getUserID(r *http.Request) int {
+	if uid, ok := r.Context().Value(contextUserID).(int); ok {
+		return uid
+	}
+	return 0
+}
+
 // writeJSON 写入 JSON 响应
 func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 	w.Header().Set("Content-Type", "application/json")
@@ -64,7 +75,8 @@ func HandleWordQuery(h *logic.WordQueryHandler) http.HandlerFunc {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "请求格式错误或 word 为空"})
 			return
 		}
-		resp, err := h.Query(req.Word)
+		userID := getUserID(r)
+		resp, err := h.Query(req.Word, userID)
 		if err != nil {
 			log.Printf("❌ 查询单词失败: %v", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "数据库查询失败"})
@@ -93,7 +105,8 @@ func HandleWordSave(h *logic.WordSaveHandler) http.HandlerFunc {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "word 不能为空"})
 			return
 		}
-		if err := h.Save(entry); err != nil {
+		userID := getUserID(r)
+		if err := h.Save(entry, userID); err != nil {
 			log.Printf("❌ 保存单词失败: %v", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "保存失败"})
 			return
@@ -115,7 +128,8 @@ func HandleWordSaveAll(h *logic.WordSaveAllHandler) http.HandlerFunc {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "请求格式错误"})
 			return
 		}
-		count, err := h.SaveAll(req.Words)
+		userID := getUserID(r)
+		count, err := h.SaveAll(req.Words, userID)
 		if err != nil {
 			log.Printf("❌ 批量保存失败: %v", err)
 		}
@@ -133,7 +147,8 @@ func HandleReviewRandom(h *logic.ReviewRandomHandler) http.HandlerFunc {
 			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "只接受 POST 请求"})
 			return
 		}
-		resp, allDone, err := h.GetRandom()
+		userID := getUserID(r)
+		resp, allDone, err := h.GetRandom(userID)
 		if err != nil {
 			log.Printf("❌ 随机抽取复习单词失败: %v", err)
 			writeJSON(w, http.StatusOK, model.ReviewErrorResponse{
@@ -159,7 +174,8 @@ func HandleReviewRecord(h *logic.ReviewRecordHandler) http.HandlerFunc {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "请求格式错误或 word_id 无效"})
 			return
 		}
-		result, err := h.Record(req.WordID)
+		userID := getUserID(r)
+		result, err := h.Record(req.WordID, userID)
 		if err != nil {
 			log.Printf("❌ 记录复习失败: %v", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "记录复习失败"})
@@ -185,7 +201,8 @@ func HandleReviewFreeRandom(h *logic.ReviewFreeRandomHandler) http.HandlerFunc {
 			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "只接受 POST 请求"})
 			return
 		}
-		resp, err := h.GetRandom()
+		userID := getUserID(r)
+		resp, err := h.GetRandom(userID)
 		if err != nil {
 			log.Printf("❌ 自由复习抽词失败: %v", err)
 			writeJSON(w, http.StatusOK, model.ReviewErrorResponse{Error: "抽取复习单词失败"})
@@ -208,7 +225,8 @@ func HandleReviewFreeRecord(h *logic.ReviewFreeRecordHandler) http.HandlerFunc {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "请求格式错误或 word_id 无效"})
 			return
 		}
-		result, err := h.Record(req.WordID)
+		userID := getUserID(r)
+		result, err := h.Record(req.WordID, userID)
 		if err != nil {
 			log.Printf("❌ 记录自由复习失败: %v", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "记录失败"})
@@ -246,7 +264,8 @@ func HandleOverview(h *logic.OverviewHandler) http.HandlerFunc {
 		if req.Month < 1 || req.Month > 12 {
 			req.Month = int(time.Now().Month())
 		}
-		data, err := h.GetOverview(req.Year, req.Month)
+		userID := getUserID(r)
+		data, err := h.GetOverview(req.Year, req.Month, userID)
 		if err != nil {
 			log.Printf("❌ 获取总览数据失败: %v", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "获取总览数据失败"})
@@ -275,7 +294,8 @@ func HandleReaderChunk(h *logic.ReaderChunkHandler) http.HandlerFunc {
 		if req.BookID <= 0 {
 			req.BookID = 1
 		}
-		result, err := h.GetChunk(req.BookID, req.Page)
+		userID := getUserID(r)
+		result, err := h.GetChunk(req.BookID, req.Page, userID)
 		if err != nil {
 			log.Printf("❌ 获取阅读块失败 (book=%d, page=%d): %v", req.BookID, req.Page, err)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "获取阅读内容失败"})
@@ -292,7 +312,8 @@ func HandleReaderDefaultBook(h *logic.ReaderProgressHandler) http.HandlerFunc {
 			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "只接受 GET 请求"})
 			return
 		}
-		progress, err := h.GetDefaultBook()
+		userID := getUserID(r)
+		progress, err := h.GetDefaultBook(userID)
 		if err != nil {
 			if err.Error() == "没有书籍" {
 				writeJSON(w, http.StatusOK, map[string]interface{}{
@@ -311,6 +332,7 @@ func HandleReaderDefaultBook(h *logic.ReaderProgressHandler) http.HandlerFunc {
 // HandleReaderProgress 阅读进度（GET 加载 / POST 保存）
 func HandleReaderProgress(h *logic.ReaderProgressHandler) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		userID := getUserID(r)
 		// 提取 book_id（query param 或 body，默认 1）
 		getBookID := func() int {
 			if idStr := r.URL.Query().Get("book"); idStr != "" {
@@ -322,7 +344,7 @@ func HandleReaderProgress(h *logic.ReaderProgressHandler) http.HandlerFunc {
 		}
 		switch r.Method {
 		case http.MethodGet:
-			progress, err := h.Load(getBookID())
+			progress, err := h.Load(getBookID(), userID)
 			if err != nil {
 				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "加载进度失败"})
 				return
@@ -337,7 +359,7 @@ func HandleReaderProgress(h *logic.ReaderProgressHandler) http.HandlerFunc {
 			if req.BookID <= 0 {
 				req.BookID = 1
 			}
-			if err := h.Save(req.BookID, req.CurrentPage, req.CurrentChunk, req.Section); err != nil {
+			if err := h.Save(req.BookID, req.CurrentPage, req.CurrentChunk, req.Section, userID); err != nil {
 				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "保存进度失败"})
 				return
 			}
@@ -361,7 +383,8 @@ func HandleReaderTOC(h *logic.ReaderTOCHandler) http.HandlerFunc {
 				bookID = id
 			}
 		}
-		result, err := h.GetTOC(bookID)
+		userID := getUserID(r)
+		result, err := h.GetTOC(bookID, userID)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "获取目录失败"})
 			return
@@ -393,7 +416,8 @@ func HandleReaderPageImage(h *logic.ReaderPageImageHandler) http.HandlerFunc {
 				bookID = id
 			}
 		}
-		data, err := h.GetPageImage(bookID, page)
+		userID := getUserID(r)
+		data, err := h.GetPageImage(bookID, page, userID)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "PDF 渲染失败"})
 			return
@@ -413,7 +437,8 @@ func HandleBookshelfList(h *logic.BookshelfHandler) http.HandlerFunc {
 			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "只接受 GET 请求"})
 			return
 		}
-		result, err := h.List()
+		userID := getUserID(r)
+		result, err := h.List(userID)
 		if err != nil {
 			log.Printf("❌ 获取书架列表失败: %v", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "获取书架列表失败"})
@@ -440,7 +465,8 @@ func HandleBookshelfGetSingle(h *logic.BookshelfHandler) http.HandlerFunc {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "id 参数无效"})
 			return
 		}
-		result, err := h.GetSingle(id)
+		userID := getUserID(r)
+		result, err := h.GetSingle(id, userID)
 		if err != nil {
 			log.Printf("❌ 获取书籍失败 (id=%d): %v", id, err)
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "书籍不存在"})
@@ -489,7 +515,8 @@ func HandleBookshelfCreate(h *logic.BookshelfHandler) http.HandlerFunc {
 			return
 		}
 
-		book, err := h.Create(title, author, description, ocrLang, pdfData)
+		userID := getUserID(r)
+		book, err := h.Create(title, author, description, ocrLang, pdfData, userID)
 		if err != nil {
 			log.Printf("❌ 上传书籍失败: %v", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "上传书籍失败，请稍后重试"})
@@ -517,7 +544,8 @@ func HandleBookshelfDelete(h *logic.BookshelfHandler) http.HandlerFunc {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "id 参数无效"})
 			return
 		}
-		if err := h.Delete(id); err != nil {
+		userID := getUserID(r)
+		if err := h.Delete(id, userID); err != nil {
 			log.Printf("❌ 删除书籍失败 (id=%d): %v", id, err)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "删除书籍失败，请稍后重试"})
 			return

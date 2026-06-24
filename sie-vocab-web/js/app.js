@@ -1,3 +1,6 @@
+// 页面初始化
+requireAuth();
+
 const input = document.getElementById('input');
 const btn   = document.getElementById('btn');
 const resp  = document.getElementById('response');
@@ -28,7 +31,7 @@ async function send() {
 
     try {
         // 1. 先查数据库
-        const qRes = await fetch('/api/word/query', {
+        const qRes = await apiFetch('/api/word/query', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ word })
@@ -62,7 +65,7 @@ async function fetchAIAndRender(mode) {
     resp.innerHTML = '正在分析单词…';
 
     try {
-        const res = await fetch('/api/chat', {
+        const res = await apiFetch('/api/chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ message: currentQueryWord })
@@ -314,7 +317,7 @@ async function saveWord(index, btnEl) {
     btnEl.textContent = '保存中…';
 
     try {
-        const res = await fetch('/api/word/save', {
+        const res = await apiFetch('/api/word/save', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(word)
@@ -341,7 +344,7 @@ async function saveAll() {
     allBtns.forEach(b => { b.disabled = true; b.textContent = b.className.includes('save-all') ? '保存中…' : '...'; });
 
     try {
-        const res = await fetch('/api/word/save-all', {
+        const res = await apiFetch('/api/word/save-all', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ words: currentWords })

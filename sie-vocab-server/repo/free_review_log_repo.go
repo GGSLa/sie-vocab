@@ -7,6 +7,7 @@ import (
 // FreeReviewLog GORM model for free_review_logs table
 type FreeReviewLog struct {
 	ID     int `gorm:"primaryKey;column:id"`
+	UserID int `gorm:"column:user_id;index"`
 	WordID int `gorm:"column:word_id"`
 }
 
@@ -24,6 +25,6 @@ func NewFreeReviewLogRepo(db *gorm.DB) *FreeReviewLogRepo {
 }
 
 // Insert 插入一条自由复习记录
-func (r *FreeReviewLogRepo) Insert(wordID int) error {
-	return r.db.Create(&FreeReviewLog{WordID: wordID}).Error
+func (r *FreeReviewLogRepo) Insert(wordID int, userID int) error {
+	return r.db.Create(&FreeReviewLog{UserID: userID, WordID: wordID}).Error
 }

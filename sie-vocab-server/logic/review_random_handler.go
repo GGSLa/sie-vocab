@@ -17,8 +17,8 @@ func NewReviewRandomHandler(familyRepo *repo.WordFamilyRepo) *ReviewRandomHandle
 
 // GetRandom 抽取一个到期复习单词
 // 返回 (response, allDone, error)
-func (h *ReviewRandomHandler) GetRandom() (*model.ReviewRandomResponse, bool, error) {
-	entry, wordID, err := h.familyRepo.GetDueWordForReview()
+func (h *ReviewRandomHandler) GetRandom(userID int) (*model.ReviewRandomResponse, bool, error) {
+	entry, wordID, err := h.familyRepo.GetDueWordForReview(userID)
 	if err != nil {
 		allDone := err.Error() == "所有单词均已排期，暂无到期复习的单词" ||
 			err.Error() == "今日复习已达上限（30词）"

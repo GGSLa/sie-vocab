@@ -17,12 +17,12 @@ func NewReviewFreeRecordHandler(familyRepo *repo.WordFamilyRepo, freeLogRepo *re
 }
 
 // Record 记录自由复习（不更新 words 计数）
-func (h *ReviewFreeRecordHandler) Record(wordID int) (*model.ReviewRecordResult, error) {
-	if err := h.freeLogRepo.Insert(wordID); err != nil {
+func (h *ReviewFreeRecordHandler) Record(wordID int, userID int) (*model.ReviewRecordResult, error) {
+	if err := h.freeLogRepo.Insert(wordID, userID); err != nil {
 		return nil, err
 	}
 
-	wCount, bCount, nextDate, _ := h.familyRepo.GetWordReviewStats(wordID)
+	wCount, bCount, nextDate, _ := h.familyRepo.GetWordReviewStats(wordID, userID)
 	return &model.ReviewRecordResult{
 		WordCount: wCount,
 		BaseCount: bCount,

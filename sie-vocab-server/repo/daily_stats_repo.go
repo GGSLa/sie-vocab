@@ -9,6 +9,7 @@ import (
 
 // DailyStats GORM model for daily_stats table
 type DailyStats struct {
+	UserID      int    `gorm:"primaryKey;column:user_id"`
 	ReviewDate  string `gorm:"primaryKey;column:review_date"`
 	WordCount   int    `gorm:"column:word_count"`
 	TotalWords  int    `gorm:"column:total_words"`
@@ -29,27 +30,26 @@ func NewDailyStatsRepo(db *gorm.DB) *DailyStatsRepo {
 }
 
 // UpsertToday 更新或插入今日复习快照
-// INSERT: word_count=1, total_words=当前单词总数
+// INSERT: word_count=1, total_words=当前用户单词总数
 // UPDATE: word_count = word_count + 1
 // is_completed 自动计算
-func (r *DailyStatsRepo) UpsertToday() error {
+func (r *DailyStatsRepo) UpsertToday(userID int) error {
 	today := Today4AM()
 
-	// Use raw SQL for the complex upsert with subquery and LEAST
 	return r.db.Exec(`
-		INSERT INTO daily_stats (review_date, word_count, total_words, is_completed)
-		VALUES (?, 1, (SELECT COUNT(*) FROM words),
-			LEAST(30, (SELECT COUNT(*) FROM words)) <= 1)
+		INSERT INTO daily_stats (user_id, review_date, word_count, total_words, is_completed)
+		VALUES (?, ?, 1, (SELECT COUNT(*) FROM words WHERE user_id = ?),
+			LEAST(30, (SELECT COUNT(*) FROM words WHERE user_id = ?)) <= 1)
 		ON DUPLICATE KEY UPDATE
 			word_count = word_count + 1,
 			is_completed = (word_count + 1 >= LEAST(30, total_words))
-	`, today).Error
+	`, userID, today, userID, userID).Error
 }
 
 // FindByMonth 查询某月所有日期的快照
-func (r *DailyStatsRepo) FindByMonth(year, month int) ([]model.DayOverview, error) {
+func (r *DailyStatsRepo) FindByMonth(year, month int, userID int) ([]model.DayOverview, error) {
 	var stats []DailyStats
-	err := r.db.Where("YEAR(review_date) = ? AND MONTH(review_date) = ?", year, month).
+	err := r.db.Where("user_id = ? AND YEAR(review_date) = ? AND MONTH(review_date) = ?", userID, year, month).
 		Order("review_date").
 		Find(&stats).Error
 	if err != nil {
@@ -72,10 +72,10 @@ func (r *DailyStatsRepo) FindByMonth(year, month int) ([]model.DayOverview, erro
 }
 
 // GetToday 获取今日快照
-func (r *DailyStatsRepo) GetToday() (*DailyStats, error) {
+func (r *DailyStatsRepo) GetToday(userID int) (*DailyStats, error) {
 	today := Today4AM()
 	var s DailyStats
-	err := r.db.Where("review_date = ?", today).First(&s).Error
+	err := r.db.Where("user_id = ? AND review_date = ?", userID, today).First(&s).Error
 	if err != nil {
 		return nil, err
 	}
@@ -83,15 +83,15 @@ func (r *DailyStatsRepo) GetToday() (*DailyStats, error) {
 }
 
 // EnsureToday 确保今日快照存在（不存在则创建）
-func (r *DailyStatsRepo) EnsureToday() error {
+func (r *DailyStatsRepo) EnsureToday(userID int) error {
 	today := Today4AM()
 	var count int64
-	if err := r.db.Model(&DailyStats{}).Where("review_date = ?", today).Count(&count).Error; err != nil {
+	if err := r.db.Model(&DailyStats{}).Where("user_id = ? AND review_date = ?", userID, today).Count(&count).Error; err != nil {
 		return err
 	}
 	if count == 0 {
 		return r.db.Clauses(clause.OnConflict{DoNothing: true}).
-			Create(&DailyStats{ReviewDate: today, WordCount: 0}).Error
+			Create(&DailyStats{UserID: userID, ReviewDate: today, WordCount: 0}).Error
 	}
 	return nil
 }

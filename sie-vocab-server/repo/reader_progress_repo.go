@@ -11,6 +11,7 @@ import (
 
 // ReaderProgress GORM model for reader_progress table
 type ReaderProgress struct {
+	UserID            int    `gorm:"primaryKey;column:user_id"`
 	BookID            int    `gorm:"primaryKey;column:book_id"`
 	CurrentPage       int    `gorm:"column:current_page"`
 	CurrentChunk      int    `gorm:"column:current_chunk"`
@@ -33,9 +34,9 @@ func NewReaderProgressRepo(db *gorm.DB) *ReaderProgressRepo {
 }
 
 // Load 读取指定书的阅读进度，若无记录则返回默认值
-func (r *ReaderProgressRepo) Load(bookID int) (*model.ReaderProgress, error) {
+func (r *ReaderProgressRepo) Load(bookID int, userID int) (*model.ReaderProgress, error) {
 	var rp ReaderProgress
-	err := r.db.Where("book_id = ?", bookID).First(&rp).Error
+	err := r.db.Where("user_id = ? AND book_id = ?", userID, bookID).First(&rp).Error
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return &model.ReaderProgress{
@@ -67,9 +68,9 @@ func (r *ReaderProgressRepo) Load(bookID int) (*model.ReaderProgress, error) {
 }
 
 // FindLastReadBookID 返回最近阅读的 book_id（按 last_read DESC），无记录返回 0
-func (r *ReaderProgressRepo) FindLastReadBookID() (int, error) {
+func (r *ReaderProgressRepo) FindLastReadBookID(userID int) (int, error) {
 	var rp ReaderProgress
-	err := r.db.Order("last_read DESC").First(&rp).Error
+	err := r.db.Where("user_id = ?", userID).Order("last_read DESC").First(&rp).Error
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return 0, nil
@@ -80,9 +81,10 @@ func (r *ReaderProgressRepo) FindLastReadBookID() (int, error) {
 }
 
 // Save 保存阅读进度（UPSERT）
-func (r *ReaderProgressRepo) Save(bookID int, progress *model.ReaderProgress) error {
+func (r *ReaderProgressRepo) Save(bookID int, progress *model.ReaderProgress, userID int) error {
 	completedJSON, _ := json.Marshal(progress.CompletedSections)
 	rp := ReaderProgress{
+		UserID:            userID,
 		BookID:            bookID,
 		CurrentPage:       progress.CurrentPage,
 		CurrentChunk:      progress.CurrentChunk,
@@ -91,7 +93,7 @@ func (r *ReaderProgressRepo) Save(bookID int, progress *model.ReaderProgress) er
 		LastRead:          progress.LastRead,
 	}
 	return r.db.Clauses(clause.OnConflict{
-		Columns: []clause.Column{{Name: "book_id"}},
+		Columns: []clause.Column{{Name: "user_id"}, {Name: "book_id"}},
 		DoUpdates: clause.AssignmentColumns([]string{
 			"current_page", "current_chunk", "current_section",
 			"completed_sections", "last_read",

@@ -16,8 +16,8 @@ func NewWordQueryHandler(familyRepo *repo.WordFamilyRepo) *WordQueryHandler {
 }
 
 // Query 查询单词族
-func (h *WordQueryHandler) Query(word string) (*model.QueryResponse, error) {
-	words, err := h.familyRepo.QueryWordFamily(word)
+func (h *WordQueryHandler) Query(word string, userID int) (*model.QueryResponse, error) {
+	words, err := h.familyRepo.QueryWordFamily(word, userID)
 	if err != nil {
 		return nil, err
 	}

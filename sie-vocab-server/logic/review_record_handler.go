@@ -16,13 +16,13 @@ func NewReviewRecordHandler(familyRepo *repo.WordFamilyRepo) *ReviewRecordHandle
 }
 
 // Record 记录一次复习，返回统计信息
-func (h *ReviewRecordHandler) Record(wordID int) (*model.ReviewRecordResult, error) {
-	_, nextDate, err := h.familyRepo.RecordReview(wordID)
+func (h *ReviewRecordHandler) Record(wordID int, userID int) (*model.ReviewRecordResult, error) {
+	_, nextDate, err := h.familyRepo.RecordReview(wordID, userID)
 	if err != nil {
 		return nil, err
 	}
 
-	wCount, bCount, nd, _ := h.familyRepo.GetWordReviewStats(wordID)
+	wCount, bCount, nd, _ := h.familyRepo.GetWordReviewStats(wordID, userID)
 	if nextDate == "" {
 		nextDate = nd
 	}

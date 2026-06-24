@@ -20,18 +20,18 @@ func NewReaderProgressHandler(progressRepo *repo.ReaderProgressRepo, bookRepo *r
 }
 
 // GetDefaultBook 获取默认书籍：优先最近阅读的，否则第一本，无书则返回 error
-func (h *ReaderProgressHandler) GetDefaultBook() (*model.ReaderProgress, error) {
+func (h *ReaderProgressHandler) GetDefaultBook(userID int) (*model.ReaderProgress, error) {
 	// 1. 尝试找到最近阅读的书籍
-	lastBookID, err := h.progressRepo.FindLastReadBookID()
+	lastBookID, err := h.progressRepo.FindLastReadBookID(userID)
 	if err != nil {
 		return nil, fmt.Errorf("查询最近阅读记录失败: %v", err)
 	}
 	if lastBookID > 0 {
-		return h.progressRepo.Load(lastBookID)
+		return h.progressRepo.Load(lastBookID, userID)
 	}
 
 	// 2. 无阅读记录，选第一本书
-	books, err := h.bookRepo.FindAll()
+	books, err := h.bookRepo.FindAll(userID)
 	if err != nil {
 		return nil, fmt.Errorf("查询书籍列表失败: %v", err)
 	}
@@ -39,17 +39,17 @@ func (h *ReaderProgressHandler) GetDefaultBook() (*model.ReaderProgress, error) 
 		return nil, fmt.Errorf("没有书籍")
 	}
 
-	return h.progressRepo.Load(books[0].ID)
+	return h.progressRepo.Load(books[0].ID, userID)
 }
 
 // Load 从 DB 加载阅读进度（无记录时返回默认值）
-func (h *ReaderProgressHandler) Load(bookID int) (*model.ReaderProgress, error) {
-	return h.progressRepo.Load(bookID)
+func (h *ReaderProgressHandler) Load(bookID int, userID int) (*model.ReaderProgress, error) {
+	return h.progressRepo.Load(bookID, userID)
 }
 
 // Save 保存阅读进度到 DB
-func (h *ReaderProgressHandler) Save(bookID, currentPage, currentChunk int, section string) error {
-	p, err := h.progressRepo.Load(bookID)
+func (h *ReaderProgressHandler) Save(bookID, currentPage, currentChunk int, section string, userID int) error {
+	p, err := h.progressRepo.Load(bookID, userID)
 	if err != nil {
 		return err
 	}
@@ -60,5 +60,5 @@ func (h *ReaderProgressHandler) Save(bookID, currentPage, currentChunk int, sect
 		p.CurrentSection = section
 	}
 	p.LastRead = time.Now().Format("2006-01-02")
-	return h.progressRepo.Save(bookID, p)
+	return h.progressRepo.Save(bookID, p, userID)
 }

@@ -6,8 +6,9 @@ let expanded = false;
 let overviewYear = 0;        // 0 = current year
 let overviewMonth = 0;       // 0 = current month
 
-// 页面加载时自动抽词
+// 页面加载时检查认证并自动抽词
 window.addEventListener('DOMContentLoaded', () => {
+    requireAuth();
     fetchRandomWord();
 });
 
@@ -67,7 +68,7 @@ async function fetchRandomWord() {
     }, 300);
 
     try {
-        const res = await fetch(apiPath, {
+        const res = await apiFetch(apiPath, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' }
         });
@@ -199,7 +200,7 @@ async function recordReview() {
     const apiPath = currentMode === 'free' ? '/api/review/free/record' : '/api/review/record';
 
     try {
-        const res = await fetch(apiPath, {
+        const res = await apiFetch(apiPath, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ word_id: currentWordID })
@@ -309,7 +310,7 @@ async function fetchOverviewData(year, month) {
     }, 300);
 
     try {
-        const res = await fetch('/api/review/overview', {
+        const res = await apiFetch('/api/review/overview', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body)

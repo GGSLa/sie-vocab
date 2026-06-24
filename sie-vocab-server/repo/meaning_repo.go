@@ -7,6 +7,7 @@ import (
 // Meaning GORM model for meanings table
 type Meaning struct {
 	ID     int    `gorm:"primaryKey;column:id"`
+	UserID int    `gorm:"column:user_id;index"`
 	WordID int    `gorm:"column:word_id"`
 	Domain string `gorm:"column:domain"`
 	Text   string `gorm:"column:text"`
@@ -26,15 +27,15 @@ func NewMeaningRepo(db *gorm.DB) *MeaningRepo {
 }
 
 // FindByWordID 查找某单词的所有释义
-func (r *MeaningRepo) FindByWordID(wordID int) ([]Meaning, error) {
+func (r *MeaningRepo) FindByWordID(wordID int, userID int) ([]Meaning, error) {
 	var meanings []Meaning
-	err := r.db.Where("word_id = ?", wordID).Find(&meanings).Error
+	err := r.db.Where("word_id = ? AND user_id = ?", wordID, userID).Find(&meanings).Error
 	return meanings, err
 }
 
 // DeleteByWordID 删除某单词的所有释义
-func (r *MeaningRepo) DeleteByWordID(tx *gorm.DB, wordID int) error {
-	return tx.Where("word_id = ?", wordID).Delete(&Meaning{}).Error
+func (r *MeaningRepo) DeleteByWordID(tx *gorm.DB, wordID int, userID int) error {
+	return tx.Where("word_id = ? AND user_id = ?", wordID, userID).Delete(&Meaning{}).Error
 }
 
 // BatchInsert 批量插入释义

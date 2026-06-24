@@ -19,7 +19,7 @@ function esc(s) {
     return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-window.addEventListener('DOMContentLoaded', () => { loadProgress(); });
+window.addEventListener('DOMContentLoaded', () => { requireAuth(); loadProgress(); });
 
 // ============ Progress ============
 
@@ -36,7 +36,7 @@ async function loadProgress() {
             currentBookId = urlBook;
         } else {
             // No book specified — ask server for default (last read > first book)
-            const res = await fetch('/api/reader/last-book');
+            const res = await apiFetch('/api/reader/last-book');
             const data = await res.json();
             if (data.no_books) {
                 showNoBooks();
@@ -50,7 +50,7 @@ async function loadProgress() {
             currentPage = urlPage;
             currentChunkIndex = 0;
         } else {
-            const res = await fetch('/api/reader/progress?book=' + currentBookId);
+            const res = await apiFetch('/api/reader/progress?book=' + currentBookId);
             const data = await res.json();
             currentPage = data.current_page || 1;
             currentChunkIndex = data.current_chunk || 0;
@@ -69,7 +69,7 @@ async function loadProgress() {
 
 async function loadBookInfo() {
     try {
-        const res = await fetch('/api/books?id=' + currentBookId);
+        const res = await apiFetch('/api/books?id=' + currentBookId);
         const data = await res.json();
         if (data && data.book) {
             currentBookTitle = data.book.title;
@@ -96,7 +96,7 @@ function syncPageURL() {
 
 async function saveProgress() {
     try {
-        await fetch('/api/reader/progress', {
+        await apiFetch('/api/reader/progress', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({
@@ -125,7 +125,7 @@ function toggleToc() {
 
 async function loadToc() {
     try {
-        const res = await fetch('/api/reader/toc?book=' + currentBookId);
+        const res = await apiFetch('/api/reader/toc?book=' + currentBookId);
         const data = await res.json();
         if (data.outline && data.outline.length > 0) {
             // PDF outline available — render hierarchical TOC
@@ -281,7 +281,7 @@ async function fetchPage(page) {
     loadPageImage(page);
 
     try {
-        const res = await fetch('/api/reader/chunk', {
+        const res = await apiFetch('/api/reader/chunk', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({book_id: currentBookId, page: page})
@@ -526,7 +526,7 @@ function loadPageImage(page) {
     container.innerHTML =
         '<div class="reader-page-img-wrap">' +
         '<div class="reader-page-img-label">第 ' + page + ' 页</div>' +
-        '<img src="/api/reader/page-image?book=' + currentBookId + '&page=' + page + '&t=' + Date.now() + '" ' +
+        '<img src="/api/reader/page-image?book=' + currentBookId + '&page=' + page + '&token=' + encodeURIComponent(getToken()) + '&t=' + Date.now() + '" ' +
         'alt="PDF Page ' + page + '" onerror="this.parentElement.innerHTML=\'<div class=reader-image-placeholder>图片加载失败</div>\'">' +
         '</div>';
 }
@@ -544,7 +544,7 @@ async function preloadNextPage(page) {
 
     try {
         // Fire both chunk and image requests in parallel, don't await
-        fetch('/api/reader/chunk', {
+        apiFetch('/api/reader/chunk', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({book_id: currentBookId, page: page}),
@@ -553,7 +553,7 @@ async function preloadNextPage(page) {
 
         // Also preload the PDF page image
         const img = new Image();
-        img.src = '/api/reader/page-image?book=' + currentBookId + '&page=' + page;
+        img.src = '/api/reader/page-image?book=' + currentBookId + '&page=' + page + '&token=' + encodeURIComponent(getToken());
     } catch (e) {
         // Silently ignore preload errors
     }
@@ -572,7 +572,7 @@ async function lookupWord(el) {
 
     try {
         // Step 1: Check database first (same logic as index page)
-        const qRes = await fetch('/api/word/query', {
+        const qRes = await apiFetch('/api/word/query', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({word: word})
@@ -599,7 +599,7 @@ async function lookupWord(el) {
 async function fetchLookupAI(word, modalBody) {
     modalBody.innerHTML = '<div class="review-loading">正在分析 <strong>' + esc(word) + '</strong>…</div>';
     try {
-        const res = await fetch('/api/chat', {
+        const res = await apiFetch('/api/chat', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({message: word})
@@ -633,7 +633,7 @@ async function retranslateLookupWord() {
 async function fetchLookupAIForDiff(word, modalBody) {
     modalBody.innerHTML = '<div class="review-loading">正在分析 <strong>' + esc(word) + '</strong>…</div>';
     try {
-        const res = await fetch('/api/chat', {
+        const res = await apiFetch('/api/chat', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({message: word})
@@ -810,7 +810,7 @@ async function saveVocabWord(index, btnEl) {
     // Step 1: Check if word already exists in DB
     btnEl.disabled = true; btnEl.textContent = '检查中…';
     try {
-        const qRes = await fetch('/api/word/query', {
+        const qRes = await apiFetch('/api/word/query', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({word: v.word})
@@ -853,7 +853,7 @@ async function saveVocabWord(index, btnEl) {
         examples: v.example ? [{en: v.example, zh: ''}] : []
     };
     try {
-        const res = await fetch('/api/word/save', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(wordEntry)});
+        const res = await apiFetch('/api/word/save', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(wordEntry)});
         const data = await res.json();
         btnEl.textContent = data.success ? '已保存' : '失败';
         if (data.success) btnEl.className = 'btn-save-small saved'; else btnEl.disabled = false;
@@ -874,7 +874,7 @@ async function saveLookupWord(index, btnEl) {
     if (lookupMode === 'diff-vocab') {
         btnEl.disabled = true; btnEl.textContent = '覆盖中…';
         try {
-            const res = await fetch('/api/word/save', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(w)});
+            const res = await apiFetch('/api/word/save', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(w)});
             const data = await res.json();
             btnEl.textContent = data.success ? '已覆盖' : '失败';
             if (data.success) {
@@ -895,7 +895,7 @@ async function saveLookupWord(index, btnEl) {
     // Step 1: Check if word already exists in DB
     btnEl.disabled = true; btnEl.textContent = '检查中…';
     try {
-        const qRes = await fetch('/api/word/query', {
+        const qRes = await apiFetch('/api/word/query', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({word: w.word})
@@ -915,7 +915,7 @@ async function saveLookupWord(index, btnEl) {
     // Step 2: Word doesn't exist — proceed with save
     btnEl.textContent = '保存中…';
     try {
-        const res = await fetch('/api/word/save', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(w)});
+        const res = await apiFetch('/api/word/save', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(w)});
         const data = await res.json();
         btnEl.textContent = data.success ? '已保存' : '失败';
         if (data.success) btnEl.className = 'btn-save saved'; else btnEl.disabled = false;
@@ -930,7 +930,7 @@ async function saveAllLookupWords() {
     if (saveAllBtn) { saveAllBtn.textContent = '保存中…'; saveAllBtn.disabled = true; }
 
     try {
-        const res = await fetch('/api/word/save-all', {
+        const res = await apiFetch('/api/word/save-all', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({words: lookupAIWords})

@@ -20,17 +20,21 @@ type ReaderPageImageHandler struct {
 
 // NewReaderPageImageHandler 创建 ReaderPageImageHandler
 func NewReaderPageImageHandler(bookRepo *repo.BookRepo) *ReaderPageImageHandler {
-	os.MkdirAll(pageImageCacheDir, 0755)
 	return &ReaderPageImageHandler{bookRepo: bookRepo}
 }
 
 const pageImageCacheDir = "/tmp/sie-page-images"
 
 // GetPageImage 获取指定书指定页的 PNG 图片（缓存到磁盘）
-func (h *ReaderPageImageHandler) GetPageImage(bookID, page int) ([]byte, error) {
-	book, err := h.bookRepo.FindByID(bookID)
+func (h *ReaderPageImageHandler) GetPageImage(bookID, page int, userID int) ([]byte, error) {
+	book, err := h.bookRepo.FindByID(bookID, userID)
 	if err != nil {
 		return nil, fmt.Errorf("书籍不存在: book_id=%d", bookID)
+	}
+
+	// 确保缓存目录存在（/tmp 可能被系统清理）
+	if err := os.MkdirAll(pageImageCacheDir, 0755); err != nil {
+		return nil, fmt.Errorf("创建图片缓存目录失败: %v", err)
 	}
 
 	// 缓存路径: /tmp/sie-page-images/book-{id}-page-{n}.png

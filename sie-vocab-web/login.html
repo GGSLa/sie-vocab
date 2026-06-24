@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SIE Vocab — 登录</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400..700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/css/style.css?v=45">
+    <style>
+        .auth-page-wrapper {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: calc(100vh - 80px);
+            padding: 20px;
+        }
+        .auth-box {
+            background: rgba(255,255,255,0.95);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border-radius: 20px;
+            box-shadow: 0 25px 80px rgba(0,0,0,0.35);
+            padding: 40px 36px;
+            max-width: 420px;
+            width: 100%;
+        }
+        .auth-toggle {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 28px;
+            justify-content: center;
+        }
+        .btn-auth-mode {
+            padding: 10px 32px;
+            font-size: 0.95rem;
+            font-weight: 700;
+            border: 2px solid #e2e4e9;
+            border-radius: 24px;
+            cursor: pointer;
+            background: #f8f9fc;
+            color: #6b7280;
+            transition: all 0.25s cubic-bezier(0.25, 0.8, 0.25, 1.2);
+            font-family: inherit;
+        }
+        .btn-auth-mode.active {
+            background: linear-gradient(135deg, #312e81, #4338ca);
+            color: #fff;
+            border-color: #312e81;
+        }
+        .btn-auth-mode:hover:not(.active) {
+            border-color: #7ec8e3;
+            color: #312e81;
+        }
+        .auth-field {
+            margin-bottom: 18px;
+        }
+        .auth-field label {
+            display: block;
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: #6b7280;
+            margin-bottom: 6px;
+        }
+        .auth-field input {
+            width: 100%;
+            padding: 14px 16px;
+            font-size: 1rem;
+            border: 2px solid #e2e4e9;
+            border-radius: 12px;
+            outline: none;
+            transition: border-color 0.25s, box-shadow 0.25s;
+            font-family: inherit;
+            box-sizing: border-box;
+        }
+        .auth-field input:focus {
+            border-color: #7ec8e3;
+            box-shadow: 0 0 0 4px rgba(126,200,227,0.12);
+        }
+        .btn-auth-submit {
+            width: 100%;
+            padding: 16px;
+            font-size: 1.05rem;
+            font-weight: 800;
+            border: none;
+            border-radius: 12px;
+            cursor: pointer;
+            background: linear-gradient(135deg, #312e81, #4338ca);
+            color: #fff;
+            transition: all 0.25s cubic-bezier(0.25, 0.8, 0.25, 1.2);
+            box-shadow: 0 4px 20px rgba(49,46,129,0.35);
+            margin-top: 8px;
+            letter-spacing: 0.5px;
+            font-family: inherit;
+        }
+        .btn-auth-submit:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 30px rgba(49,46,129,0.45);
+        }
+        .btn-auth-submit:disabled {
+            opacity: 0.7;
+            cursor: not-allowed;
+            transform: none;
+        }
+        .auth-error {
+            color: #ef4444;
+            font-size: 0.9rem;
+            font-weight: 600;
+            text-align: center;
+            margin-bottom: 12px;
+            padding: 10px;
+            background: rgba(239,68,68,0.08);
+            border-radius: 8px;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="wrapper">
+        <nav class="nav-bar">
+            <span class="nav-current">SIE Vocab</span>
+        </nav>
+
+        <div class="auth-page-wrapper">
+            <div class="header" style="margin-bottom: 24px;">
+                <h1 id="auth-title">🔐 登录</h1>
+                <p id="auth-subtitle">登录以继续学习</p>
+            </div>
+            <div class="auth-box">
+                <div class="auth-toggle">
+                    <button id="btn-login-mode" class="btn-auth-mode active" onclick="setAuthMode('login')">登录</button>
+                    <button id="btn-register-mode" class="btn-auth-mode" onclick="setAuthMode('register')">注册</button>
+                </div>
+                <form id="auth-form" onsubmit="handleAuth(event)">
+                    <div class="auth-field">
+                        <label>用户名</label>
+                        <input type="text" id="auth-username" placeholder="3-50个字符" required minlength="3" maxlength="50" autocomplete="username">
+                    </div>
+                    <div class="auth-field">
+                        <label>密码</label>
+                        <input type="password" id="auth-password" placeholder="至少6个字符" required minlength="6" autocomplete="current-password">
+                    </div>
+                    <div id="auth-error" class="auth-error"></div>
+                    <button type="submit" class="btn-auth-submit" id="btn-auth-submit">登录</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <script src="/js/auth.js?v=1"></script>
+    <script src="/js/login.js?v=1"></script>
+</body>
+</html>

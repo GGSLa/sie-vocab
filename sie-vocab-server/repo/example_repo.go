@@ -7,6 +7,7 @@ import (
 // Example GORM model for examples table
 type Example struct {
 	ID        int    `gorm:"primaryKey;column:id"`
+	UserID    int    `gorm:"column:user_id;index"`
 	WordID    int    `gorm:"column:word_id"`
 	En        string `gorm:"column:en"`
 	Zh        string `gorm:"column:zh"`
@@ -27,15 +28,15 @@ func NewExampleRepo(db *gorm.DB) *ExampleRepo {
 }
 
 // FindByWordID 查找某单词的所有例句，按 sort_order 排序
-func (r *ExampleRepo) FindByWordID(wordID int) ([]Example, error) {
+func (r *ExampleRepo) FindByWordID(wordID int, userID int) ([]Example, error) {
 	var examples []Example
-	err := r.db.Where("word_id = ?", wordID).Order("sort_order").Find(&examples).Error
+	err := r.db.Where("word_id = ? AND user_id = ?", wordID, userID).Order("sort_order").Find(&examples).Error
 	return examples, err
 }
 
 // DeleteByWordID 删除某单词的所有例句
-func (r *ExampleRepo) DeleteByWordID(tx *gorm.DB, wordID int) error {
-	return tx.Where("word_id = ?", wordID).Delete(&Example{}).Error
+func (r *ExampleRepo) DeleteByWordID(tx *gorm.DB, wordID int, userID int) error {
+	return tx.Where("word_id = ? AND user_id = ?", wordID, userID).Delete(&Example{}).Error
 }
 
 // BatchInsert 批量插入例句

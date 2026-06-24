@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -11,12 +12,16 @@ import (
 
 	"gorm.io/gorm"
 
+	"sie-vocab-server/auth"
 	"sie-vocab-server/client"
 	"sie-vocab-server/logic"
 	"sie-vocab-server/model"
 	"sie-vocab-server/repo"
 	"sie-vocab-server/service"
 )
+
+// contextUserID 用于在 context 中存储用户 ID（字符串键，跨包可用）
+const contextUserID = "userID"
 
 func main() {
 	cfg, err := loadConfig()
@@ -47,6 +52,7 @@ func main() {
 	familyRepo := repo.NewWordFamilyRepo(db)
 	bookRepo := repo.NewBookRepo(db)
 	progressRepo := repo.NewReaderProgressRepo(db)
+	userRepo := repo.NewUserRepo(db)
 
 	// ── Logic 层 ──
 	chatHandler := logic.NewChatHandler(cfg.DeepSeekAPIKey)
@@ -63,8 +69,9 @@ func main() {
 	readerTOCHandler := logic.NewReaderTOCHandler(bookRepo, readerCacheRepo)
 	readerPageImageHandler := logic.NewReaderPageImageHandler(bookRepo)
 	bookshelfHandler := logic.NewBookshelfHandler(bookRepo, progressRepo, readerCacheRepo, cfg.UploadDir, cfg.OCRLanguage)
+	authHandler := logic.NewAuthHandler(userRepo, cfg.JWTSecret)
 
-	// 消除未使用变量警告（部分 repo 待后续使用）
+	// 消除未使用变量警告（部分 repo 仅在 WordFamilyRepo 内部使用）
 	_ = wordRepo
 	_ = meaningRepo
 	_ = exampleRepo
@@ -74,51 +81,66 @@ func main() {
 	exePath, _ := os.Executable()
 	staticDir := filepath.Join(filepath.Dir(exePath), "..", "sie-vocab-web")
 
-	// ── 安全中间件 ──
-	// withSecurity 添加安全头 + 可选认证
-	withSecurity := func(next http.HandlerFunc) http.HandlerFunc {
+	// ── JWT 认证中间件 ──
+	withAuth := func(next http.HandlerFunc) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
 			// 安全头
 			w.Header().Set("X-Content-Type-Options", "nosniff")
 			w.Header().Set("X-Frame-Options", "DENY")
 			w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
-			// 简单 CSP：允许自身资源 + Google Fonts
 			w.Header().Set("Content-Security-Policy",
 				"default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'")
 
-			// 认证检测（仅当配置了 api_token 时生效）
-			if cfg.APIToken != "" {
-				auth := r.Header.Get("Authorization")
-				if !strings.HasPrefix(auth, "Bearer ") || strings.TrimPrefix(auth, "Bearer ") != cfg.APIToken {
-					w.Header().Set("Content-Type", "application/json")
-					w.WriteHeader(http.StatusUnauthorized)
-					json.NewEncoder(w).Encode(map[string]string{"error": "未授权访问"})
-					return
-				}
+			// JWT 认证 — 优先从 Authorization 头获取，回退到 URL query 参数（用于 <img> 等无法设头的请求）
+			authHeader := r.Header.Get("Authorization")
+			tokenStr := ""
+			if strings.HasPrefix(authHeader, "Bearer ") {
+				tokenStr = strings.TrimPrefix(authHeader, "Bearer ")
+			} else {
+				tokenStr = r.URL.Query().Get("token")
+			}
+			if tokenStr == "" {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusUnauthorized)
+				json.NewEncoder(w).Encode(map[string]string{"error": "未授权访问"})
+				return
+			}
+			userID, err := auth.ValidateToken(tokenStr, cfg.JWTSecret)
+			if err != nil {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusUnauthorized)
+				json.NewEncoder(w).Encode(map[string]string{"error": "token 无效或已过期"})
+				return
 			}
 
-			next(w, r)
+			// 将 userID 存入 context
+			ctx := context.WithValue(r.Context(), contextUserID, userID)
+			next(w, r.WithContext(ctx))
 		}
 	}
 
-	// ── API 路由（全部经过安全中间件） ──
-	http.HandleFunc("/api/chat", withSecurity(service.HandleChat(chatHandler)))
-	http.HandleFunc("/api/word/query", withSecurity(service.HandleWordQuery(wordQueryHandler)))
-	http.HandleFunc("/api/word/save", withSecurity(service.HandleWordSave(wordSaveHandler)))
-	http.HandleFunc("/api/word/save-all", withSecurity(service.HandleWordSaveAll(wordSaveAllHandler)))
-	http.HandleFunc("/api/review/random", withSecurity(service.HandleReviewRandom(reviewRandomHandler)))
-	http.HandleFunc("/api/review/record", withSecurity(service.HandleReviewRecord(reviewRecordHandler)))
-	http.HandleFunc("/api/review/free/random", withSecurity(service.HandleReviewFreeRandom(reviewFreeRandomHandler)))
-	http.HandleFunc("/api/review/free/record", withSecurity(service.HandleReviewFreeRecord(reviewFreeRecordHandler)))
-	http.HandleFunc("/api/review/overview", withSecurity(service.HandleOverview(overviewHandler)))
-	http.HandleFunc("/api/reader/chunk", withSecurity(service.HandleReaderChunk(readerChunkHandler)))
-	http.HandleFunc("/api/reader/last-book", withSecurity(service.HandleReaderDefaultBook(readerProgressHandler)))
-	http.HandleFunc("/api/reader/progress", withSecurity(service.HandleReaderProgress(readerProgressHandler)))
-	http.HandleFunc("/api/reader/toc", withSecurity(service.HandleReaderTOC(readerTOCHandler)))
-	http.HandleFunc("/api/reader/page-image", withSecurity(service.HandleReaderPageImage(readerPageImageHandler)))
+	// ── 认证路由（无需 JWT） ──
+	http.HandleFunc("/api/auth/register", service.HandleRegister(authHandler))
+	http.HandleFunc("/api/auth/login", service.HandleLogin(authHandler))
+
+	// ── API 路由（JWT 认证保护） ──
+	http.HandleFunc("/api/chat", withAuth(service.HandleChat(chatHandler)))
+	http.HandleFunc("/api/word/query", withAuth(service.HandleWordQuery(wordQueryHandler)))
+	http.HandleFunc("/api/word/save", withAuth(service.HandleWordSave(wordSaveHandler)))
+	http.HandleFunc("/api/word/save-all", withAuth(service.HandleWordSaveAll(wordSaveAllHandler)))
+	http.HandleFunc("/api/review/random", withAuth(service.HandleReviewRandom(reviewRandomHandler)))
+	http.HandleFunc("/api/review/record", withAuth(service.HandleReviewRecord(reviewRecordHandler)))
+	http.HandleFunc("/api/review/free/random", withAuth(service.HandleReviewFreeRandom(reviewFreeRandomHandler)))
+	http.HandleFunc("/api/review/free/record", withAuth(service.HandleReviewFreeRecord(reviewFreeRecordHandler)))
+	http.HandleFunc("/api/review/overview", withAuth(service.HandleOverview(overviewHandler)))
+	http.HandleFunc("/api/reader/chunk", withAuth(service.HandleReaderChunk(readerChunkHandler)))
+	http.HandleFunc("/api/reader/last-book", withAuth(service.HandleReaderDefaultBook(readerProgressHandler)))
+	http.HandleFunc("/api/reader/progress", withAuth(service.HandleReaderProgress(readerProgressHandler)))
+	http.HandleFunc("/api/reader/toc", withAuth(service.HandleReaderTOC(readerTOCHandler)))
+	http.HandleFunc("/api/reader/page-image", withAuth(service.HandleReaderPageImage(readerPageImageHandler)))
 
 	// 书架
-	http.HandleFunc("/api/books", withSecurity(func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc("/api/books", withAuth(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
 			if r.URL.Query().Get("id") != "" {
@@ -137,7 +159,7 @@ func main() {
 		}
 	}))
 
-	// 静态文件（禁用缓存）
+	// 静态文件（无需认证，前端 JS 自行处理重定向）
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 		w.Header().Set("Pragma", "no-cache")
@@ -169,6 +191,9 @@ func loadConfig() (*model.Config, error) {
 	}
 	if cfg.DeepSeekAPIKey == "" {
 		return nil, fmt.Errorf("配置文件中 deepseek_api_key 不能为空")
+	}
+	if cfg.JWTSecret == "" {
+		return nil, fmt.Errorf("配置文件中 jwt_secret 不能为空")
 	}
 	if cfg.Port == "" {
 		cfg.Port = "8080"

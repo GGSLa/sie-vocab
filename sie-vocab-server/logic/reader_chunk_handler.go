@@ -44,11 +44,11 @@ func NewReaderChunkHandler(apiKey string, bookRepo *repo.BookRepo, cacheRepo *re
 }
 
 // GetChunk 获取指定书籍指定页的 AI 分析结果（含缓存、去重、跨页补全）
-func (h *ReaderChunkHandler) GetChunk(bookID, page int) (*model.ReaderChunkResponse, error) {
+func (h *ReaderChunkHandler) GetChunk(bookID, page int, userID int) (*model.ReaderChunkResponse, error) {
 	log.Printf("📖 阅读请求: book=%d page=%d", bookID, page)
 
 	// 获取书籍信息（pdf路径 + OCR语言）
-	book, err := h.bookRepo.FindByID(bookID)
+	book, err := h.bookRepo.FindByID(bookID, userID)
 	if err != nil {
 		return nil, fmt.Errorf("书籍不存在: book_id=%d", bookID)
 	}

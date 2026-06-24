@@ -27,14 +27,15 @@ func (r *WordFamilyRepo) DB() *gorm.DB {
 }
 
 // QueryWordFamily 按单词查询整个词族（含 meanings + examples）
-func (r *WordFamilyRepo) QueryWordFamily(word string) ([]model.WordEntry, error) {
+func (r *WordFamilyRepo) QueryWordFamily(word string, userID int) ([]model.WordEntry, error) {
 	// 1. 查单词基本信息
 	var wID int
 	var wBaseWord sql.NullString
 	var wType, wPos string
 	var wDeriv sql.NullString
 	err := r.db.Raw(
-		"SELECT id, base_word, type, pos, derivation FROM words WHERE word = ?", word,
+		"SELECT id, base_word, type, pos, derivation FROM words WHERE user_id = ? AND word = ?",
+		userID, word,
 	).Row().Scan(&wID, &wBaseWord, &wType, &wPos, &wDeriv)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -53,9 +54,9 @@ func (r *WordFamilyRepo) QueryWordFamily(word string) ([]model.WordEntry, error)
 	var rows []Row
 	err = r.db.Raw(
 		`SELECT id, word, base_word, type, pos, derivation FROM words
-		 WHERE word = ? OR base_word = ?
+		 WHERE user_id = ? AND (word = ? OR base_word = ?)
 		 ORDER BY CASE WHEN type = '基础词' THEN 0 ELSE 1 END, id`,
-		familyRoot, familyRoot,
+		userID, familyRoot, familyRoot,
 	).Scan(&rows).Error
 	if err != nil {
 		return nil, err
@@ -78,22 +79,22 @@ func (r *WordFamilyRepo) QueryWordFamily(word string) ([]model.WordEntry, error)
 			entry.Derivation = &d
 		}
 
-		// Meanings — scan into slice (works with GORM Scan)
+		// Meanings
 		var meanings []struct {
 			Domain string
 			Text   string
 		}
-		r.db.Raw("SELECT domain, text FROM meanings WHERE word_id = ?", row.ID).Scan(&meanings)
+		r.db.Raw("SELECT domain, text FROM meanings WHERE word_id = ? AND user_id = ?", row.ID, userID).Scan(&meanings)
 		for _, m := range meanings {
 			entry.Meanings = append(entry.Meanings, model.Meaning{Domain: m.Domain, Text: m.Text})
 		}
 
-		// Examples — scan into slice (works with GORM Scan)
+		// Examples
 		var examples []struct {
 			En string
 			Zh string
 		}
-		r.db.Raw("SELECT en, zh FROM examples WHERE word_id = ? ORDER BY sort_order", row.ID).Scan(&examples)
+		r.db.Raw("SELECT en, zh FROM examples WHERE word_id = ? AND user_id = ? ORDER BY sort_order", row.ID, userID).Scan(&examples)
 		for _, e := range examples {
 			entry.Examples = append(entry.Examples, model.Example{En: e.En, Zh: e.Zh})
 		}
@@ -117,12 +118,12 @@ type Row struct {
 
 // GetDueWordForReview 每日模式：随机抽取一个到期且今日未复习的单词
 // 返回完整 WordEntry、word_id、错误
-func (r *WordFamilyRepo) GetDueWordForReview() (*model.WordEntry, int, error) {
+func (r *WordFamilyRepo) GetDueWordForReview(userID int) (*model.WordEntry, int, error) {
 	today := Today4AM()
 
 	// 0. 检查今日复习数量是否已达上限
 	var todayCount int64
-	r.db.Raw("SELECT COUNT(*) FROM review_logs WHERE review_date = ?", today).Row().Scan(&todayCount)
+	r.db.Raw("SELECT COUNT(*) FROM review_logs WHERE user_id = ? AND review_date = ?", userID, today).Row().Scan(&todayCount)
 	if todayCount >= 30 {
 		return nil, 0, fmt.Errorf("今日复习已达上限（30词）")
 	}
@@ -131,15 +132,15 @@ func (r *WordFamilyRepo) GetDueWordForReview() (*model.WordEntry, int, error) {
 	var familyRoot string
 	err := r.db.Raw(`
 		SELECT word FROM words
-		WHERE type = '基础词'
+		WHERE user_id = ? AND type = '基础词'
 		  AND (next_review_date IS NULL OR next_review_date <= ?)
 		  AND word NOT IN (
 			SELECT DISTINCT COALESCE(w2.base_word, w2.word)
 			FROM review_logs rl
-			JOIN words w2 ON rl.word_id = w2.id
-			WHERE rl.review_date = ?
+			JOIN words w2 ON rl.word_id = w2.id AND rl.user_id = w2.user_id
+			WHERE rl.user_id = ? AND rl.review_date = ?
 		  )
-		ORDER BY RAND() LIMIT 1`, today, today).Row().Scan(&familyRoot)
+		ORDER BY RAND() LIMIT 1`, userID, today, userID, today).Row().Scan(&familyRoot)
 	if err != nil {
 		if err == sql.ErrNoRows || familyRoot == "" {
 			return nil, 0, fmt.Errorf("所有单词均已排期，暂无到期复习的单词")
@@ -152,18 +153,18 @@ func (r *WordFamilyRepo) GetDueWordForReview() (*model.WordEntry, int, error) {
 	var pickedWord string
 	err = r.db.Raw(`
 		SELECT id, word FROM words
-		WHERE (word = ? OR base_word = ?)
+		WHERE user_id = ? AND (word = ? OR base_word = ?)
 		  AND (next_review_date IS NULL OR next_review_date <= ?)
 		  AND id NOT IN (
-			SELECT word_id FROM review_logs WHERE review_date = ?
+			SELECT word_id FROM review_logs WHERE user_id = ? AND review_date = ?
 		  )
-		ORDER BY RAND() LIMIT 1`, familyRoot, familyRoot, today, today).Row().Scan(&pickedID, &pickedWord)
+		ORDER BY RAND() LIMIT 1`, userID, familyRoot, familyRoot, today, userID, today).Row().Scan(&pickedID, &pickedWord)
 	if err != nil {
 		return nil, 0, err
 	}
 
 	// 3. 获取完整词族数据
-	family, err := r.QueryWordFamily(pickedWord)
+	family, err := r.QueryWordFamily(pickedWord, userID)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -197,13 +198,13 @@ func nextReviewInterval(reviewCount int) int {
 
 // RecordReview 记录每日模式复习，更新间隔
 // 返回 (newCount, nextDate, error)
-func (r *WordFamilyRepo) RecordReview(wordID int) (newCount int, nextDate string, err error) {
+func (r *WordFamilyRepo) RecordReview(wordID int, userID int) (newCount int, nextDate string, err error) {
 	today := Today4AM()
 
 	// 1. INSERT IGNORE 防止同日重复记录
 	result := r.db.Exec(
-		"INSERT IGNORE INTO review_logs (word_id, review_date) VALUES (?, ?)",
-		wordID, today,
+		"INSERT IGNORE INTO review_logs (user_id, word_id, review_date) VALUES (?, ?, ?)",
+		userID, wordID, today,
 	)
 	if result.Error != nil {
 		return 0, "", result.Error
@@ -213,7 +214,8 @@ func (r *WordFamilyRepo) RecordReview(wordID int) (newCount int, nextDate string
 		// 今日已记录过，读取当前状态返回
 		var nd sql.NullString
 		err = r.db.Raw(
-			"SELECT review_count, next_review_date FROM words WHERE id = ?", wordID,
+			"SELECT review_count, next_review_date FROM words WHERE id = ? AND user_id = ?",
+			wordID, userID,
 		).Row().Scan(&newCount, &nd)
 		if err != nil {
 			return 0, "", err
@@ -223,30 +225,30 @@ func (r *WordFamilyRepo) RecordReview(wordID int) (newCount int, nextDate string
 		} else {
 			// 修复遗留数据
 			r.db.Exec(
-				"UPDATE words SET next_review_date = DATE_ADD(?, INTERVAL 1 DAY), updated_at = NOW() WHERE id = ?",
-				today, wordID,
+				"UPDATE words SET next_review_date = DATE_ADD(?, INTERVAL 1 DAY), updated_at = NOW() WHERE id = ? AND user_id = ?",
+				today, wordID, userID,
 			)
-			r.db.Raw("SELECT next_review_date FROM words WHERE id = ?", wordID).Row().Scan(&nextDate)
+			r.db.Raw("SELECT next_review_date FROM words WHERE id = ? AND user_id = ?", wordID, userID).Row().Scan(&nextDate)
 		}
 		return
 	}
 
 	// 本次是该单词今日首次复习 → 更新每日快照
 	r.db.Exec(`
-		INSERT INTO daily_stats (review_date, word_count, total_words, is_completed)
-		VALUES (?, 1, (SELECT COUNT(*) FROM words),
-			LEAST(30, (SELECT COUNT(*) FROM words)) <= 1)
+		INSERT INTO daily_stats (user_id, review_date, word_count, total_words, is_completed)
+		VALUES (?, ?, 1, (SELECT COUNT(*) FROM words WHERE user_id = ?),
+			LEAST(30, (SELECT COUNT(*) FROM words WHERE user_id = ?)) <= 1)
 		ON DUPLICATE KEY UPDATE
 			word_count = word_count + 1,
 			is_completed = (word_count + 1 >= LEAST(30, total_words))
-	`, today)
+	`, userID, today, userID, userID)
 
 	// 2. 检查是否过期
 	var currentCount int
 	var isOverdue bool
 	err = r.db.Raw(`
 		SELECT review_count, next_review_date IS NOT NULL AND next_review_date < ?
-		FROM words WHERE id = ?`, today, wordID,
+		FROM words WHERE id = ? AND user_id = ?`, today, wordID, userID,
 	).Row().Scan(&currentCount, &isOverdue)
 	if err != nil {
 		return 0, "", err
@@ -260,14 +262,14 @@ func (r *WordFamilyRepo) RecordReview(wordID int) (newCount int, nextDate string
 
 	// 3. UPDATE words
 	err = r.db.Exec(
-		"UPDATE words SET review_count = ?, next_review_date = DATE_ADD(?, INTERVAL ? DAY), updated_at = NOW() WHERE id = ?",
-		newCount, today, interval, wordID,
+		"UPDATE words SET review_count = ?, next_review_date = DATE_ADD(?, INTERVAL ? DAY), updated_at = NOW() WHERE id = ? AND user_id = ?",
+		newCount, today, interval, wordID, userID,
 	).Error
 	if err != nil {
 		return 0, "", err
 	}
 
-	r.db.Raw("SELECT next_review_date FROM words WHERE id = ?", wordID).Row().Scan(&nextDate)
+	r.db.Raw("SELECT next_review_date FROM words WHERE id = ? AND user_id = ?", wordID, userID).Row().Scan(&nextDate)
 	return newCount, nextDate, nil
 }
 
@@ -275,14 +277,14 @@ func (r *WordFamilyRepo) RecordReview(wordID int) (newCount int, nextDate string
 // wordCount: 该单词本身的复习次数
 // baseCount: 该单词所属词族的总复习次数
 // nextDate: 下次复习日期
-func (r *WordFamilyRepo) GetWordReviewStats(wordID int) (wordCount int, baseCount int, nextDate string, err error) {
+func (r *WordFamilyRepo) GetWordReviewStats(wordID int, userID int) (wordCount int, baseCount int, nextDate string, err error) {
 	// 1. 查询单词信息
 	var wWord, wType string
 	var wBaseWord sql.NullString
 	var wNextReview sql.NullString
 	err = r.db.Raw(
-		"SELECT word, type, base_word, review_count, next_review_date FROM words WHERE id = ?",
-		wordID,
+		"SELECT word, type, base_word, review_count, next_review_date FROM words WHERE id = ? AND user_id = ?",
+		wordID, userID,
 	).Row().Scan(&wWord, &wType, &wBaseWord, &wordCount, &wNextReview)
 	if err != nil {
 		return 0, 0, "", err
@@ -299,9 +301,9 @@ func (r *WordFamilyRepo) GetWordReviewStats(wordID int) (wordCount int, baseCoun
 	var bc int64
 	r.db.Raw(`
 		SELECT COUNT(*) FROM review_logs rl
-		JOIN words w ON rl.word_id = w.id
-		WHERE w.word = ? OR w.base_word = ?
-	`, familyRoot, familyRoot).Row().Scan(&bc)
+		JOIN words w ON rl.word_id = w.id AND rl.user_id = w.user_id
+		WHERE rl.user_id = ? AND (w.word = ? OR w.base_word = ?)
+	`, userID, familyRoot, familyRoot).Row().Scan(&bc)
 	baseCount = int(bc)
 
 	return wordCount, baseCount, nextDate, nil
@@ -310,11 +312,12 @@ func (r *WordFamilyRepo) GetWordReviewStats(wordID int) (wordCount int, baseCoun
 // ---------- 自由模式 ----------
 
 // GetRandomWordForFreeReview 自由模式：完全随机抽词
-func (r *WordFamilyRepo) GetRandomWordForFreeReview() (*model.WordEntry, int, error) {
+func (r *WordFamilyRepo) GetRandomWordForFreeReview(userID int) (*model.WordEntry, int, error) {
 	// 1. 随机选一个基础词族
 	var familyRoot string
 	err := r.db.Raw(
-		"SELECT word FROM words WHERE type = '基础词' ORDER BY RAND() LIMIT 1",
+		"SELECT word FROM words WHERE user_id = ? AND type = '基础词' ORDER BY RAND() LIMIT 1",
+		userID,
 	).Row().Scan(&familyRoot)
 	if err != nil {
 		if err == sql.ErrNoRows || familyRoot == "" {
@@ -327,15 +330,15 @@ func (r *WordFamilyRepo) GetRandomWordForFreeReview() (*model.WordEntry, int, er
 	var pickedID int
 	var pickedWord string
 	err = r.db.Raw(
-		"SELECT id, word FROM words WHERE word = ? OR base_word = ? ORDER BY RAND() LIMIT 1",
-		familyRoot, familyRoot,
+		"SELECT id, word FROM words WHERE user_id = ? AND (word = ? OR base_word = ?) ORDER BY RAND() LIMIT 1",
+		userID, familyRoot, familyRoot,
 	).Row().Scan(&pickedID, &pickedWord)
 	if err != nil {
 		return nil, 0, err
 	}
 
 	// 3. 获取完整数据
-	family, err := r.QueryWordFamily(pickedWord)
+	family, err := r.QueryWordFamily(pickedWord, userID)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -352,7 +355,7 @@ func (r *WordFamilyRepo) GetRandomWordForFreeReview() (*model.WordEntry, int, er
 // ---------- 总览 ----------
 
 // GetMonthOverview 获取月度总览数据
-func (r *WordFamilyRepo) GetMonthOverview(year, month int) (*model.OverviewResponse, error) {
+func (r *WordFamilyRepo) GetMonthOverview(year, month int, userID int) (*model.OverviewResponse, error) {
 	resp := &model.OverviewResponse{
 		Year:        year,
 		Month:       month,
@@ -361,23 +364,23 @@ func (r *WordFamilyRepo) GetMonthOverview(year, month int) (*model.OverviewRespo
 
 	// Total words
 	var tw int64
-	r.db.Raw("SELECT COUNT(*) FROM words").Row().Scan(&tw)
+	r.db.Raw("SELECT COUNT(*) FROM words WHERE user_id = ?", userID).Row().Scan(&tw)
 	resp.TotalWords = int(tw)
 
 	// Total reviews
 	var tr int64
-	r.db.Raw("SELECT COUNT(*) FROM review_logs").Row().Scan(&tr)
+	r.db.Raw("SELECT COUNT(*) FROM review_logs WHERE user_id = ?", userID).Row().Scan(&tr)
 	resp.TotalReviews = int(tr)
 
 	// Today's review count
 	today := Today4AM()
 	var td int64
-	r.db.Raw("SELECT COUNT(*) FROM review_logs WHERE review_date = ?", today).Row().Scan(&td)
+	r.db.Raw("SELECT COUNT(*) FROM review_logs WHERE user_id = ? AND review_date = ?", userID, today).Row().Scan(&td)
 	resp.TodayReviewed = int(td)
 
 	// Monthly data from daily_stats
 	var stats []DailyStats
-	r.db.Where("YEAR(review_date) = ? AND MONTH(review_date) = ?", year, month).
+	r.db.Where("user_id = ? AND YEAR(review_date) = ? AND MONTH(review_date) = ?", userID, year, month).
 		Order("review_date").
 		Find(&stats)
 
@@ -394,7 +397,7 @@ func (r *WordFamilyRepo) GetMonthOverview(year, month int) (*model.OverviewRespo
 	}
 
 	// Streak: consecutive days from most recent review date backwards
-	dates, _ := r.getDistinctReviewDates()
+	dates, _ := r.getDistinctReviewDates(userID)
 	if len(dates) > 0 {
 		dateSet := make(map[string]bool, len(dates))
 		for _, d := range dates {
@@ -414,10 +417,11 @@ func (r *WordFamilyRepo) GetMonthOverview(year, month int) (*model.OverviewRespo
 	return resp, nil
 }
 
-func (r *WordFamilyRepo) getDistinctReviewDates() ([]string, error) {
+func (r *WordFamilyRepo) getDistinctReviewDates(userID int) ([]string, error) {
 	var dates []string
 	err := r.db.Raw(
-		"SELECT DISTINCT review_date FROM review_logs ORDER BY review_date DESC",
+		"SELECT DISTINCT review_date FROM review_logs WHERE user_id = ? ORDER BY review_date DESC",
+		userID,
 	).Pluck("review_date", &dates).Error
 	// Truncate to YYYY-MM-DD
 	for i, d := range dates {
@@ -431,37 +435,37 @@ func (r *WordFamilyRepo) getDistinctReviewDates() ([]string, error) {
 // ---------- 单词保存（事务） ----------
 
 // SaveWord 在事务中保存单个单词（含 meanings + examples）
-func (r *WordFamilyRepo) SaveWord(entry model.WordEntry) error {
+func (r *WordFamilyRepo) SaveWord(entry model.WordEntry, userID int) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
-		// 1. Upsert words
+		// 1. Upsert words（含 user_id）
 		if err := tx.Exec(`
-			INSERT INTO words (word, base_word, type, pos, derivation)
-			VALUES (?, ?, ?, ?, ?)
+			INSERT INTO words (user_id, word, base_word, type, pos, derivation)
+			VALUES (?, ?, ?, ?, ?, ?)
 			ON DUPLICATE KEY UPDATE
 				base_word = VALUES(base_word),
 				type = VALUES(type),
 				pos = VALUES(pos),
 				derivation = VALUES(derivation),
 				updated_at = NOW()
-		`, entry.Word, entry.BaseWord, entry.Type, entry.Pos, entry.Derivation).Error; err != nil {
+		`, userID, entry.Word, entry.BaseWord, entry.Type, entry.Pos, entry.Derivation).Error; err != nil {
 			return err
 		}
 
 		// 2. Get word ID
 		var wordID int
-		if err := tx.Raw("SELECT id FROM words WHERE word = ?", entry.Word).Row().Scan(&wordID); err != nil {
+		if err := tx.Raw("SELECT id FROM words WHERE user_id = ? AND word = ?", userID, entry.Word).Row().Scan(&wordID); err != nil {
 			return err
 		}
 
 		// 3. Delete old meanings & examples
-		tx.Exec("DELETE FROM meanings WHERE word_id = ?", wordID)
-		tx.Exec("DELETE FROM examples WHERE word_id = ?", wordID)
+		tx.Exec("DELETE FROM meanings WHERE word_id = ? AND user_id = ?", wordID, userID)
+		tx.Exec("DELETE FROM examples WHERE word_id = ? AND user_id = ?", wordID, userID)
 
 		// 4. Insert meanings
 		for _, m := range entry.Meanings {
 			if err := tx.Exec(
-				"INSERT INTO meanings (word_id, domain, text) VALUES (?, ?, ?)",
-				wordID, m.Domain, m.Text,
+				"INSERT INTO meanings (user_id, word_id, domain, text) VALUES (?, ?, ?, ?)",
+				userID, wordID, m.Domain, m.Text,
 			).Error; err != nil {
 				return err
 			}
@@ -470,8 +474,8 @@ func (r *WordFamilyRepo) SaveWord(entry model.WordEntry) error {
 		// 5. Insert examples
 		for i, e := range entry.Examples {
 			if err := tx.Exec(
-				"INSERT INTO examples (word_id, en, zh, sort_order) VALUES (?, ?, ?, ?)",
-				wordID, e.En, e.Zh, i,
+				"INSERT INTO examples (user_id, word_id, en, zh, sort_order) VALUES (?, ?, ?, ?, ?)",
+				userID, wordID, e.En, e.Zh, i,
 			).Error; err != nil {
 				return err
 			}
@@ -482,13 +486,13 @@ func (r *WordFamilyRepo) SaveWord(entry model.WordEntry) error {
 }
 
 // SaveWords 批量保存单词
-func (r *WordFamilyRepo) SaveWords(entries []model.WordEntry) (int, error) {
+func (r *WordFamilyRepo) SaveWords(entries []model.WordEntry, userID int) (int, error) {
 	count := 0
 	for _, entry := range entries {
 		if entry.Word == "" {
 			continue
 		}
-		if err := r.SaveWord(entry); err != nil {
+		if err := r.SaveWord(entry, userID); err != nil {
 			continue
 		}
 		count++

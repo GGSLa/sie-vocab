@@ -5,6 +5,7 @@ let loading = false;
 
 // ── 页面加载 ──
 document.addEventListener('DOMContentLoaded', () => {
+    requireAuth();
     loadBooks();
     setupDragDrop();
 });
@@ -22,7 +23,7 @@ async function loadBooks() {
     error.style.display = 'none';
 
     try {
-        const resp = await fetch('/api/books');
+        const resp = await apiFetch('/api/books');
         const data = await resp.json();
 
         if (data.books && data.books.length > 0) {
@@ -92,7 +93,7 @@ async function deleteBook(id, title) {
     }
 
     try {
-        const resp = await fetch(`/api/books?id=${id}`, { method: 'DELETE' });
+        const resp = await apiFetch(`/api/books?id=${id}`, { method: 'DELETE' });
         const data = await resp.json();
         if (data.success) {
             loadBooks();
@@ -147,7 +148,7 @@ async function uploadBook(event) {
     formData.append('ocr_lang', document.getElementById('upload-ocr').value);
 
     try {
-        const resp = await fetch('/api/books', {
+        const resp = await apiFetch('/api/books', {
             method: 'POST',
             body: formData,
         });
@@ -170,10 +171,29 @@ async function uploadBook(event) {
     btn.textContent = '📤 上传';
 }
 
+// ── 文件选择后自动填充标题 ──
+function autoFillTitle(file) {
+    const titleInput = document.getElementById('upload-title');
+    if (titleInput && file && !titleInput.value.trim()) {
+        titleInput.value = file.name.replace(/\.pdf$/i, '');
+    }
+}
+
 // ── 拖拽上传 ──
 function setupDragDrop() {
     const dropzone = document.getElementById('upload-dropzone');
+    const fileInput = document.getElementById('upload-file');
     if (!dropzone) return;
+
+    // 点击选择文件 — 自动填标题
+    if (fileInput) {
+        fileInput.addEventListener('change', () => {
+            if (fileInput.files.length > 0) {
+                updateDropzoneLabel();
+                autoFillTitle(fileInput.files[0]);
+            }
+        });
+    }
 
     ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
         dropzone.addEventListener(eventName, e => {
@@ -199,6 +219,7 @@ function setupDragDrop() {
         if (files.length > 0) {
             document.getElementById('upload-file').files = files;
             updateDropzoneLabel();
+            autoFillTitle(files[0]);
         }
     });
 }

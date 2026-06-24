@@ -26,8 +26,8 @@ type TOCResult struct {
 }
 
 // GetTOC 获取指定书的 PDF 大纲 + 已缓存页面标记
-func (h *ReaderTOCHandler) GetTOC(bookID int) (*TOCResult, error) {
-	book, err := h.bookRepo.FindByID(bookID)
+func (h *ReaderTOCHandler) GetTOC(bookID int, userID int) (*TOCResult, error) {
+	book, err := h.bookRepo.FindByID(bookID, userID)
 	if err != nil {
 		return nil, err
 	}

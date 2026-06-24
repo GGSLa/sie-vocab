@@ -13,10 +13,10 @@ type MySQLConfig struct {
 type Config struct {
 	DeepSeekAPIKey        string      `json:"deepseek_api_key"`
 	Port                  string      `json:"port"`
-	APIToken              string      `json:"api_token"` // 可选，设置后 /api/* 需 Bearer 认证
+	JWTSecret             string      `json:"jwt_secret"` // JWT 签名密钥（必填）
+	APIToken              string      `json:"api_token"`  // 已弃用，由 JWT 用户系统替代
 	MySQL                 MySQLConfig `json:"mysql"`
 	SIE_PDFPath           string      `json:"sie_pdf_path"`
-	SIE_ProgressPath      string      `json:"sie_progress_path"`
 	OCRLanguage           string      `json:"ocr_language"`
 	UploadDir             string      `json:"upload_dir"`
 	DeepSeekRPM           int         `json:"deepseek_rpm"`

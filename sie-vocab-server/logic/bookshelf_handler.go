@@ -48,8 +48,8 @@ func NewBookshelfHandler(
 }
 
 // List 获取所有书籍（含阅读进度）
-func (h *BookshelfHandler) List() (*model.BookListResponse, error) {
-	books, err := h.bookRepo.FindAll()
+func (h *BookshelfHandler) List(userID int) (*model.BookListResponse, error) {
+	books, err := h.bookRepo.FindAll(userID)
 	if err != nil {
 		return nil, err
 	}
@@ -60,12 +60,12 @@ func (h *BookshelfHandler) List() (*model.BookListResponse, error) {
 }
 
 // GetSingle 获取单本书籍（含阅读进度）
-func (h *BookshelfHandler) GetSingle(bookID int) (*model.BookWithProgress, error) {
-	book, err := h.bookRepo.FindByID(bookID)
+func (h *BookshelfHandler) GetSingle(bookID int, userID int) (*model.BookWithProgress, error) {
+	book, err := h.bookRepo.FindByID(bookID, userID)
 	if err != nil {
 		return nil, err
 	}
-	progress, _ := h.progressRepo.Load(bookID)
+	progress, _ := h.progressRepo.Load(bookID, userID)
 	return &model.BookWithProgress{
 		Book:           *book,
 		CurrentPage:    progress.CurrentPage,
@@ -75,7 +75,7 @@ func (h *BookshelfHandler) GetSingle(bookID int) (*model.BookWithProgress, error
 }
 
 // Create 保存上传的 PDF 并创建书籍记录
-func (h *BookshelfHandler) Create(title, author, description, ocrLang string, pdfData []byte) (*model.Book, error) {
+func (h *BookshelfHandler) Create(title, author, description, ocrLang string, pdfData []byte, userID int) (*model.Book, error) {
 	if ocrLang == "" {
 		ocrLang = h.defaultOCRLang
 	}
@@ -94,6 +94,7 @@ func (h *BookshelfHandler) Create(title, author, description, ocrLang string, pd
 
 	// 先在 DB 中创建记录（获取 ID）
 	row := &repo.Book{
+		UserID:      userID,
 		Title:       title,
 		Author:      author,
 		Description: description,
@@ -109,18 +110,18 @@ func (h *BookshelfHandler) Create(title, author, description, ocrLang string, pd
 	filePath := filepath.Join(h.uploadDir, fileName)
 	if err := os.WriteFile(filePath, pdfData, 0644); err != nil {
 		// 清理 DB 记录
-		h.bookRepo.Delete(row.ID)
+		h.bookRepo.Delete(row.ID, userID)
 		return nil, fmt.Errorf("保存 PDF 文件失败: %v", err)
 	}
 
 	// 更新 DB 中的 pdf_path 和 page_count
 	pageCount := detectPageCount(filePath)
-	if err := h.bookRepo.UpdatePDFInfo(row.ID, filePath, pageCount); err != nil {
+	if err := h.bookRepo.UpdatePDFInfo(row.ID, filePath, pageCount, userID); err != nil {
 		log.Printf("⚠️ 更新 pdf_path 失败 (book=%d): %v", row.ID, err)
 	}
 
 	// 重新读取完整记录
-	book, err := h.bookRepo.FindByID(row.ID)
+	book, err := h.bookRepo.FindByID(row.ID, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -130,8 +131,8 @@ func (h *BookshelfHandler) Create(title, author, description, ocrLang string, pd
 }
 
 // Delete 删除书籍及其关联数据
-func (h *BookshelfHandler) Delete(bookID int) error {
-	book, err := h.bookRepo.FindByID(bookID)
+func (h *BookshelfHandler) Delete(bookID int, userID int) error {
+	book, err := h.bookRepo.FindByID(bookID, userID)
 	if err != nil {
 		return fmt.Errorf("书籍不存在: id=%d", bookID)
 	}
@@ -140,12 +141,12 @@ func (h *BookshelfHandler) Delete(bookID int) error {
 	if err := h.bookRepo.DeleteCacheByBook(bookID); err != nil {
 		log.Printf("⚠️ 删除 reader_cache 失败 (book=%d): %v", bookID, err)
 	}
-	if err := h.bookRepo.DeleteProgressByBook(bookID); err != nil {
+	if err := h.bookRepo.DeleteProgressByBook(bookID, userID); err != nil {
 		log.Printf("⚠️ 删除 reader_progress 失败 (book=%d): %v", bookID, err)
 	}
 
 	// 删除 DB 记录
-	if err := h.bookRepo.Delete(bookID); err != nil {
+	if err := h.bookRepo.Delete(bookID, userID); err != nil {
 		return fmt.Errorf("删除书籍记录失败: %v", err)
 	}
 

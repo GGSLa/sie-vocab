@@ -16,6 +16,6 @@ func NewOverviewHandler(familyRepo *repo.WordFamilyRepo) *OverviewHandler {
 }
 
 // GetOverview 获取月度总览数据
-func (h *OverviewHandler) GetOverview(year, month int) (*model.OverviewResponse, error) {
-	return h.familyRepo.GetMonthOverview(year, month)
+func (h *OverviewHandler) GetOverview(year, month int, userID int) (*model.OverviewResponse, error) {
+	return h.familyRepo.GetMonthOverview(year, month, userID)
 }

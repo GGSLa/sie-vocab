@@ -32,6 +32,11 @@ func InitDB(cfg model.MySQLConfig) (*gorm.DB, error) {
 		return nil, fmt.Errorf("数据库连接测试失败: %v", err)
 	}
 
+	// 自动迁移（用户系统 + 数据隔离）
+	if err := AutoMigrate(db); err != nil {
+		return nil, fmt.Errorf("数据库迁移失败: %v", err)
+	}
+
 	return db, nil
 }
 

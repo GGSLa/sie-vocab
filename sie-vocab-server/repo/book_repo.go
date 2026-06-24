@@ -9,6 +9,7 @@ import (
 // Book GORM model for books table
 type Book struct {
 	ID          int    `gorm:"primaryKey;column:id"`
+	UserID      int    `gorm:"column:user_id;index:idx_books_user_id"`
 	Title       string `gorm:"column:title"`
 	Author      string `gorm:"column:author"`
 	Description string `gorm:"column:description"`
@@ -35,10 +36,10 @@ func (r *BookRepo) Create(b *Book) error {
 	return r.db.Create(b).Error
 }
 
-// FindAll 查询所有书
-func (r *BookRepo) FindAll() ([]model.Book, error) {
+// FindAll 查询某用户的所有书
+func (r *BookRepo) FindAll(userID int) ([]model.Book, error) {
 	var rows []Book
-	err := r.db.Order("id ASC").Find(&rows).Error
+	err := r.db.Where("user_id = ?", userID).Order("id ASC").Find(&rows).Error
 	if err != nil {
 		return nil, err
 	}
@@ -49,10 +50,10 @@ func (r *BookRepo) FindAll() ([]model.Book, error) {
 	return books, nil
 }
 
-// FindByID 按 ID 查书
-func (r *BookRepo) FindByID(id int) (*model.Book, error) {
+// FindByID 按 ID 查书（含用户校验）
+func (r *BookRepo) FindByID(id int, userID int) (*model.Book, error) {
 	var row Book
-	err := r.db.Where("id = ?", id).First(&row).Error
+	err := r.db.Where("id = ? AND user_id = ?", id, userID).First(&row).Error
 	if err != nil {
 		return nil, err
 	}
@@ -60,27 +61,27 @@ func (r *BookRepo) FindByID(id int) (*model.Book, error) {
 	return &b, nil
 }
 
-// Delete 按 ID 删书
-func (r *BookRepo) Delete(id int) error {
-	return r.db.Where("id = ?", id).Delete(&Book{}).Error
+// Delete 按 ID 删书（含用户校验）
+func (r *BookRepo) Delete(id int, userID int) error {
+	return r.db.Where("id = ? AND user_id = ?", id, userID).Delete(&Book{}).Error
 }
 
 // UpdatePDFInfo 更新书的 PDF 路径和总页数
-func (r *BookRepo) UpdatePDFInfo(id int, pdfPath string, pageCount int) error {
-	return r.db.Model(&Book{}).Where("id = ?", id).Updates(map[string]interface{}{
+func (r *BookRepo) UpdatePDFInfo(id int, pdfPath string, pageCount int, userID int) error {
+	return r.db.Model(&Book{}).Where("id = ? AND user_id = ?", id, userID).Updates(map[string]interface{}{
 		"pdf_path":   pdfPath,
 		"page_count": pageCount,
 	}).Error
 }
 
-// DeleteCacheByBook 删除指定书的所有 reader_cache 记录
+// DeleteCacheByBook 删除指定书的所有 reader_cache 记录（缓存共享，无需 userID）
 func (r *BookRepo) DeleteCacheByBook(bookID int) error {
 	return r.db.Where("book_id = ?", bookID).Delete(&ReaderCache{}).Error
 }
 
-// DeleteProgressByBook 删除指定书的阅读进度
-func (r *BookRepo) DeleteProgressByBook(bookID int) error {
-	return r.db.Where("book_id = ?", bookID).Delete(&ReaderProgress{}).Error
+// DeleteProgressByBook 删除指定书的阅读进度（含用户校验）
+func (r *BookRepo) DeleteProgressByBook(bookID int, userID int) error {
+	return r.db.Where("book_id = ? AND user_id = ?", bookID, userID).Delete(&ReaderProgress{}).Error
 }
 
 // bookRowToModel 将 GORM row 转为 model.Book
