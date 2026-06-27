@@ -60,7 +60,8 @@ const SystemPrompt = `你是一个为 SIE（Securities Industry Essentials）考
 - 输出必须以 { 开头，以 } 结尾。
 - JSON 必须是合法的，可以被 JSON.parse() 直接解析。
 - 如果用户输入的不是单个单词（短语或句子），返回：{"error": "请输入单个英语单词，不支持短语或句子。"}
-- 如果单词无法识别，返回：{"error": "无法识别该单词，请检查拼写。"}`
+- 如果单词无法识别，返回：{"error": "无法识别该单词，请检查拼写。"}
+- words 数组中不能有两个 word 值相同的条目。如果同一个拼写在金融/日常使用中既能作名词又能作动词（如 exempt 既是 n. 又是 v.），请在基础词的 pos 字段中用"/"连接合并为一个条目（如 "n./v."），绝对不能输出两个 word 相同的条目分别标为"基础词"和"衍生词"。`
 
 const ReaderSystemPrompt = `你是一个 SIE（Securities Industry Essentials）考试教材的阅读辅助助手。你的任务是为英语学习者处理教材文本。
 

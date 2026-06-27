@@ -362,9 +362,9 @@ func (r *WordFamilyRepo) GetMonthOverview(year, month int, userID int) (*model.O
 		MonthlyData: []model.DayOverview{},
 	}
 
-	// Total words
+	// Total words (仅统计基础词 / base words only)
 	var tw int64
-	r.db.Raw("SELECT COUNT(*) FROM words WHERE user_id = ?", userID).Row().Scan(&tw)
+	r.db.Raw("SELECT COUNT(*) FROM words WHERE user_id = ? AND type = '基础词'", userID).Row().Scan(&tw)
 	resp.TotalWords = int(tw)
 
 	// Total reviews
@@ -437,15 +437,15 @@ func (r *WordFamilyRepo) getDistinctReviewDates(userID int) ([]string, error) {
 // SaveWord 在事务中保存单个单词（含 meanings + examples）
 func (r *WordFamilyRepo) SaveWord(entry model.WordEntry, userID int) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
-		// 1. Upsert words（含 user_id）
+		// 1. Upsert words (含 user_id) — 基础词优先：已存在的基础词不被同 word 的衍生词覆盖
 		if err := tx.Exec(`
 			INSERT INTO words (user_id, word, base_word, type, pos, derivation)
 			VALUES (?, ?, ?, ?, ?, ?)
 			ON DUPLICATE KEY UPDATE
-				base_word = VALUES(base_word),
-				type = VALUES(type),
+				type = IF(type = '基础词', '基础词', VALUES(type)),
+				base_word = IF(type = '基础词', base_word, VALUES(base_word)),
+				derivation = IF(type = '基础词', derivation, VALUES(derivation)),
 				pos = VALUES(pos),
-				derivation = VALUES(derivation),
 				updated_at = NOW()
 		`, userID, entry.Word, entry.BaseWord, entry.Type, entry.Pos, entry.Derivation).Error; err != nil {
 			return err
@@ -485,14 +485,35 @@ func (r *WordFamilyRepo) SaveWord(entry model.WordEntry, userID int) error {
 	})
 }
 
-// SaveWords 批量保存单词
+// SaveWords 批量保存单词 — 先去重：同 word 时基础词优先，合并释义和例句
 func (r *WordFamilyRepo) SaveWords(entries []model.WordEntry, userID int) (int, error) {
-	count := 0
-	for _, entry := range entries {
-		if entry.Word == "" {
+	// 预去重：同 word 的多个条目，基础词优先，合并释义和例句
+	seen := make(map[string]*model.WordEntry)
+	for i := range entries {
+		w := entries[i].Word
+		if w == "" {
 			continue
 		}
-		if err := r.SaveWord(entry, userID); err != nil {
+		if existing, ok := seen[w]; ok {
+			// 冲突：基础词优先
+			if entries[i].Type == "基础词" && existing.Type != "基础词" {
+				// 新条目是基础词，保留新条目，合并旧条目的 meanings/examples
+				entries[i].Meanings = append(entries[i].Meanings, existing.Meanings...)
+				entries[i].Examples = append(entries[i].Examples, existing.Examples...)
+				seen[w] = &entries[i]
+			} else {
+				// 保留 existing，把新条目的 meanings/examples 合并到 existing
+				existing.Meanings = append(existing.Meanings, entries[i].Meanings...)
+				existing.Examples = append(existing.Examples, entries[i].Examples...)
+			}
+		} else {
+			seen[w] = &entries[i]
+		}
+	}
+
+	count := 0
+	for _, entry := range seen {
+		if err := r.SaveWord(*entry, userID); err != nil {
 			continue
 		}
 		count++
