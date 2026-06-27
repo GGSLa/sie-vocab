@@ -341,12 +341,28 @@ func buildStructuredText(lines []textLine, bodySize int) string {
 		// Build text from elements
 		var lineText strings.Builder
 		lastRight := -100
+		lastFont := -1
 		for _, el := range line.elements {
-			if lastRight > 0 && el.left-lastRight > 5 {
+			needSpace := false
+			if lastRight > 0 {
+				if el.left-lastRight > 5 {
+					needSpace = true
+				} else if lastFont >= 0 && el.font != lastFont {
+					// Font change with tiny gap: words in different fonts
+					// (e.g. italic) may overlap or touch in PDF coordinates.
+					prevEndsWithLetter := lineText.Len() > 0 && isLetter(rune(lineText.String()[lineText.Len()-1]))
+					currStartsWithLetter := len(el.text) > 0 && isLetter(rune(el.text[0]))
+					if prevEndsWithLetter && currStartsWithLetter {
+						needSpace = true
+					}
+				}
+			}
+			if needSpace {
 				lineText.WriteByte(' ')
 			}
 			lineText.WriteString(el.text)
 			lastRight = el.left + el.width
+			lastFont = el.font
 		}
 		text := strings.TrimSpace(lineText.String())
 		if text == "" {
@@ -520,6 +536,11 @@ func abs(x int) int {
 		return -x
 	}
 	return x
+}
+
+// isLetter returns true if r is an ASCII letter.
+func isLetter(r rune) bool {
+	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z')
 }
 
 // ---------- OCR fallback for scanned/image-based PDF pages ----------
@@ -786,11 +807,87 @@ func mergeHardWrappedLines(text string) string {
 	// lowercase letter or a common continuation word, merge them.
 	result = mergeFalseParagraphBreaks(result)
 
+	// Third pass: split body text that was merged into callout lines
+	// e.g. "»...securities being offered The preceding information..." → callout + "\n\n" + body
+	result = splitBodyFromCalloutLines(result)
+
 	return strings.TrimSpace(result)
+}
+
+// splitBodyFromCalloutLines detects when body text has been merged into a
+// callout line (no blank-line separator in the original PDF text extraction).
+// It looks for two patterns within callout lines:
+//   1. "...word. CapitalWord..." — sentence-ending period + capital
+//   2. "...word CapitalWord..." — no period but body text starts mid-line
+// and splits them, inserting a blank-line paragraph break.
+func splitBodyFromCalloutLines(text string) string {
+	lines := strings.Split(text, "\n")
+	var out []string
+
+	for _, line := range lines {
+		if !strings.HasPrefix(strings.TrimSpace(line), "»") {
+			out = append(out, line)
+			continue
+		}
+
+		trimmed := strings.TrimSpace(line)
+		runes := []rune(trimmed)
+		splitIdx := -1
+
+		// Pattern 1: ". <Capital>" — sentence-ending period followed by capital
+		for j := 0; j < len(runes)-3; j++ {
+			if runes[j] == '.' && runes[j+1] == ' ' &&
+				runes[j+2] >= 'A' && runes[j+2] <= 'Z' {
+				if j > 0 && runes[j-1] >= 'a' && runes[j-1] <= 'z' {
+					ahead := string(runes[j+2:])
+					if len(strings.Fields(ahead)) >= 5 {
+						splitIdx = j + 2
+						break
+					}
+				}
+			}
+		}
+
+		// Pattern 2: "<lowercase> <Capital>" — no period, body text follows
+		// the last bullet point directly (e.g. "...offered The preceding...")
+		if splitIdx < 0 {
+			for j := 1; j < len(runes)-3; j++ {
+				if runes[j] >= 'a' && runes[j] <= 'z' &&
+					runes[j+1] == ' ' &&
+					runes[j+2] >= 'A' && runes[j+2] <= 'Z' {
+					ahead := string(runes[j+2:])
+					aheadWords := strings.Fields(ahead)
+					// Require more words (8+) and ending with period to confirm
+					// it's real body text, not just a proper noun mid-sentence
+					if len(aheadWords) >= 8 && strings.Contains(ahead, ".") {
+						splitIdx = j + 2
+						break
+					}
+				}
+			}
+		}
+
+		if splitIdx > 0 {
+			calloutPart := strings.TrimSpace(string(runes[:splitIdx]))
+			bodyPart := strings.TrimSpace(string(runes[splitIdx:]))
+			log.Printf("✂️ splitBodyFromCalloutLines: 已拆分 callout=%.50s body=%.50s",
+				calloutPart[len(calloutPart)-min(50, len(calloutPart)):],
+				bodyPart[:min(50, len(bodyPart))])
+			out = append(out, calloutPart)
+			out = append(out, "")
+			out = append(out, bodyPart)
+		} else {
+			out = append(out, line)
+		}
+	}
+
+	return strings.Join(out, "\n")
 }
 
 // mergeFalseParagraphBreaks does a second pass over paragraph-separated
 // blocks and merges those that are clearly false breaks (mid-sentence).
+// Also handles callout continuation lines that were incorrectly split into
+// separate blocks by the structured text extractor.
 func mergeFalseParagraphBreaks(text string) string {
 	blocks := strings.Split(text, "\n\n")
 	if len(blocks) < 2 {
@@ -803,7 +900,29 @@ func mergeFalseParagraphBreaks(text string) string {
 	for i := 1; i < len(blocks); i++ {
 		next := blocks[i]
 
-		// Don't merge if either block is a heading or callout
+		// Never merge if next block starts a new section (heading)
+		if looksLikeHeading(next) {
+			merged = append(merged, current)
+			current = next
+			continue
+		}
+
+		// If current is a callout/list that doesn't end with sentence-ending
+		// punctuation, allow merging with a continuation next block.
+		// This handles bullet points split across PDF lines with false paragraph breaks.
+		currentLastLine := getLastLine(current)
+		nextIsContinuation := isContinuation(currentLastLine, next)
+
+		if looksLikeCalloutOrList(current) && nextIsContinuation {
+			if strings.HasSuffix(strings.TrimSpace(current), "-") {
+				current = strings.TrimRight(current, "- \t") + strings.TrimLeft(next, " \t")
+			} else {
+				current += " " + strings.TrimLeft(next, " \t")
+			}
+			continue
+		}
+
+		// Never merge across headings
 		if looksLikeSpecialBlock(current) || looksLikeSpecialBlock(next) {
 			merged = append(merged, current)
 			current = next
@@ -811,7 +930,7 @@ func mergeFalseParagraphBreaks(text string) string {
 		}
 
 		// Merge if the next block looks like a continuation of the current one
-		if isContinuation(current, next) {
+		if nextIsContinuation {
 			// Hyphenated word break across blocks
 			if strings.HasSuffix(strings.TrimSpace(current), "-") {
 				current = strings.TrimRight(current, "- \t") + strings.TrimLeft(next, " \t")
@@ -827,6 +946,26 @@ func mergeFalseParagraphBreaks(text string) string {
 
 	merged = append(merged, current)
 	return strings.Join(merged, "\n\n")
+}
+
+// getLastLine returns the last line of a multi-line block.
+func getLastLine(block string) string {
+	lines := strings.Split(block, "\n")
+	if len(lines) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(lines[len(lines)-1])
+}
+
+// looksLikeHeading returns true if the block starts with a markdown heading marker.
+func looksLikeHeading(block string) bool {
+	return strings.HasPrefix(strings.TrimSpace(block), "#")
+}
+
+// looksLikeCalloutOrList returns true if the block starts with a callout marker or list item.
+func looksLikeCalloutOrList(block string) bool {
+	firstLine := strings.TrimSpace(block)
+	return strings.HasPrefix(firstLine, "»") || isListItem(firstLine)
 }
 
 // looksLikeSpecialBlock returns true if the block is a heading, callout, or list item.

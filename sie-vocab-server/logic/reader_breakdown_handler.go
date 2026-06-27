@@ -1,9 +1,11 @@
 package logic
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
 	"strings"
 
 	"sie-vocab-server/client"
@@ -31,7 +33,9 @@ func (h *ReaderBreakdownHandler) Breakdown(sentence string) (*model.BreakdownSen
 
 	result, err := parseBreakdownReply(reply)
 	if err != nil {
-		log.Printf("❌ 解析句子拆解回复失败: %v\n原始回复: %.200s", err, reply)
+		log.Printf("❌ 解析句子拆解回复失败: %v (响应长度=%d)", err, len(reply))
+		// 保存完整原始回复到文件方便排查 / Save raw reply for debugging
+		os.WriteFile("/tmp/breakdown_raw.txt", []byte(reply), 0644)
 		return &model.BreakdownSentenceResponse{
 			Error: "AI 回复解析失败，请重试",
 		}, nil
@@ -44,18 +48,111 @@ func (h *ReaderBreakdownHandler) Breakdown(sentence string) (*model.BreakdownSen
 
 func parseBreakdownReply(reply string) (*model.BreakdownSentenceResponse, error) {
 	var result model.BreakdownSentenceResponse
+
+	// 1. Try raw parse
 	if err := json.Unmarshal([]byte(reply), &result); err == nil {
 		return &result, nil
 	}
-	cleaned := reply
-	if idx := strings.Index(cleaned, "{"); idx >= 0 {
-		cleaned = cleaned[idx:]
+
+	// 2. Strip markdown code fences
+	cleaned := strings.TrimSpace(reply)
+	cleaned = strings.TrimPrefix(cleaned, "```json")
+	cleaned = strings.TrimPrefix(cleaned, "```")
+	cleaned = strings.TrimSuffix(cleaned, "```")
+	cleaned = strings.TrimSpace(cleaned)
+
+	// 3. Extract JSON using brace counting
+	start := strings.Index(cleaned, "{")
+	if start < 0 {
+		return nil, fmt.Errorf("未找到 JSON 开头")
 	}
-	if idx := strings.LastIndex(cleaned, "}"); idx >= 0 {
-		cleaned = cleaned[:idx+1]
+	depth := 0
+	end := -1
+	for i := start; i < len(cleaned); i++ {
+		ch := cleaned[i]
+		if ch == '{' {
+			depth++
+		} else if ch == '}' {
+			depth--
+			if depth == 0 {
+				end = i
+				break
+			}
+		} else if ch == '"' {
+			i++
+			for i < len(cleaned) {
+				if cleaned[i] == '\\' {
+					i += 2
+				} else if cleaned[i] == '"' {
+					break
+				} else {
+					i++
+				}
+			}
+		}
 	}
-	if err := json.Unmarshal([]byte(cleaned), &result); err != nil {
+	if end < 0 {
+		return nil, fmt.Errorf("未找到匹配的 JSON 结束括号")
+	}
+	cleaned = cleaned[start : end+1]
+
+	// 4. Try parsing cleaned JSON
+	if err := json.Unmarshal([]byte(cleaned), &result); err == nil {
+		return &result, nil
+	}
+
+	// 5. Escape literal control chars inside JSON strings (AI sometimes outputs real newlines)
+	sanitized := sanitizeJSONStrings(cleaned)
+	if err := json.Unmarshal([]byte(sanitized), &result); err != nil {
 		return nil, fmt.Errorf("解析 AI 回复 JSON 失败: %v", err)
 	}
 	return &result, nil
+}
+
+// sanitizeJSONStrings escapes literal control characters (\n \r \t) that
+// appear inside JSON string values. DeepSeek sometimes outputs real newlines
+// inside long text fields like usage_notes, which breaks JSON parsing.
+func sanitizeJSONStrings(raw string) string {
+	var buf bytes.Buffer
+	inString := false
+	escaped := false
+
+	for i := 0; i < len(raw); i++ {
+		ch := raw[i]
+
+		if escaped {
+			buf.WriteByte(ch)
+			escaped = false
+			continue
+		}
+
+		if ch == '\\' && inString {
+			buf.WriteByte(ch)
+			escaped = true
+			continue
+		}
+
+		if ch == '"' {
+			inString = !inString
+			buf.WriteByte(ch)
+			continue
+		}
+
+		if inString {
+			switch ch {
+			case '\n':
+				buf.WriteString("\\n")
+			case '\r':
+				buf.WriteString("\\r")
+			case '\t':
+				buf.WriteByte(ch) // tabs are valid in JSON
+			default:
+				buf.WriteByte(ch)
+			}
+		} else {
+			buf.WriteByte(ch)
+		}
+	}
+
+	return buf.String()
 }
