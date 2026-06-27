@@ -1,8 +1,7 @@
-// SIE Reader — 按原PDF页划分，跨页段落自动补齐
+// SIE Reader — 整页阅读，跨页段落自动补齐
 let currentBookId = 1;
 let currentBookTitle = '';
 let currentPage = 67;
-let currentChunkIndex = 0;
 let pageData = null;
 let loading = false;
 let tocExpanded = false;
@@ -50,12 +49,10 @@ async function loadProgress() {
         if (urlPage && urlPage > 0) {
             // Shared link — override saved progress with URL page
             currentPage = urlPage;
-            currentChunkIndex = 0;
         } else {
             const res = await apiFetch('/api/reader/progress?book=' + currentBookId);
             const data = await res.json();
             currentPage = data.current_page || 1;
-            currentChunkIndex = data.current_chunk || 0;
             currentBookId = data.book_id || currentBookId;
             document.getElementById('reader-subtitle').textContent =
                 data.current_section || 'SIE 考试教材';
@@ -104,7 +101,7 @@ async function saveProgress() {
             body: JSON.stringify({
                 book_id: currentBookId,
                 current_page: currentPage,
-                current_chunk: currentChunkIndex,
+                current_chunk: 0,
                 section: pageData ? pageData.section : ''
             })
         });
@@ -264,7 +261,6 @@ function highlightTocPage() {
 
 function jumpToTocPage(page) {
     if (loading) return;
-    currentChunkIndex = 0;
     fetchPage(page);
 }
 
@@ -281,7 +277,6 @@ async function fetchPage(page) {
     lastLookupPanelHTML = '';
     document.getElementById('reader-return-word').style.display = 'none';
     document.getElementById('reader-main').style.display = 'none';
-    document.getElementById('reader-actions').style.display = 'none';
 
     // 立即加载左侧 PDF 图片，不等待右侧 chunk API 返回 / Load PDF image immediately; don't wait for chunk API
     loadPageImage(page);
@@ -309,14 +304,10 @@ async function fetchPage(page) {
 
         pageData = data;
         currentPage = page;
-        if (currentChunkIndex >= data.chunks.length) {
-            currentChunkIndex = data.chunks.length - 1;  // clamp to last chunk
-        }
-        renderChunk();
+        renderPage();
         updatePageNav();
         highlightTocPage();
         document.getElementById('reader-main').style.display = 'block';
-        document.getElementById('reader-actions').style.display = 'block';
         document.getElementById('reader-subtitle').textContent = data.section || 'SIE 考试教材';
         syncPageURL();  // keep URL in sync with current page for sharing
         saveProgress();
@@ -332,17 +323,14 @@ async function fetchPage(page) {
     }
 }
 
-// ============ Chunk Rendering ============
+// ============ Page Rendering ============
 
-function renderChunk() {
+function renderPage() {
     if (!pageData || !pageData.chunks || pageData.chunks.length === 0) {
         showEmpty('此页无内容');
         return;
     }
-    if (currentChunkIndex >= pageData.chunks.length) {
-        currentChunkIndex = pageData.chunks.length - 1;
-    }
-    const chunk = pageData.chunks[currentChunkIndex];
+    const chunk = pageData.chunks[0];
 
     let sectionHTML = '<h2>' + esc(pageData.section || '') + '</h2>';
     sectionHTML += '<span class="reader-page-num">PDF 第 ' + pageData.page + ' 页';
@@ -463,37 +451,13 @@ function renderGrammar(grammar) {
 
 // ============ Navigation ============
 
-function nextChunk() {
-    if (loading || !pageData || !pageData.chunks) return;
-    if (currentChunkIndex < pageData.chunks.length - 1) {
-        currentChunkIndex++;
-        renderChunk();
-        saveProgress();
-    } else {
-        nextPage();
-    }
-}
-
-function prevChunk() {
-    if (loading || !pageData) return;
-    if (currentChunkIndex > 0) {
-        currentChunkIndex--;
-        renderChunk();
-        saveProgress();
-    } else {
-        prevPage();
-    }
-}
-
 function nextPage() {
     if (loading) return;
-    currentChunkIndex = 0;
     fetchPage(currentPage + 1);
 }
 
 function prevPage() {
     if (loading || currentPage <= 1) return;
-    currentChunkIndex = 2147483647;  // large sentinel → clamped to last chunk in fetchPage
     fetchPage(currentPage - 1);
 }
 
@@ -502,7 +466,6 @@ function jumpToPage() {
     const input = document.getElementById('input-jump-page');
     const page = parseInt(input.value);
     if (page > 0) {
-        currentChunkIndex = 0;
         fetchPage(page);
         input.value = '';
     }
@@ -512,17 +475,6 @@ function updatePageNav() {
     if (!pageData) return;
     document.getElementById('reader-page-display').textContent = '第 ' + currentPage + ' 页';
     document.getElementById('btn-prev-page').disabled = currentPage <= 1;
-
-    const total = pageData.chunks.length;
-    const current = currentChunkIndex + 1;
-    document.getElementById('reader-chunk-display').textContent = current + ' / ' + total;
-    document.getElementById('btn-prev-chunk').disabled = currentChunkIndex <= 0;
-    document.getElementById('btn-next-chunk').disabled = currentChunkIndex >= total - 1;
-
-    const pct = Math.round((currentChunkIndex / Math.max(1, total)) * 100);
-    document.getElementById('reader-progress').innerHTML =
-        '<div class="progress-bar-bg"><div class="progress-bar-fill" style="width:' + pct + '%"></div></div>' +
-        '<span class="progress-text">第 ' + currentPage + ' 页  ' + current + '/' + total + ' 段</span>';
 }
 
 // ============ Page Image ============
@@ -836,8 +788,8 @@ function renderLookupCardContent(words, mode) {
 }
 
 async function saveVocabWord(index, btnEl) {
-    if (!pageData || !pageData.chunks || !pageData.chunks[currentChunkIndex]) return;
-    const v = pageData.chunks[currentChunkIndex].vocab[index];
+    if (!pageData || !pageData.chunks || !pageData.chunks[0]) return;
+    const v = pageData.chunks[0].vocab[index];
     if (!v) return;
 
     // Step 1: Check if word already exists in DB
@@ -1021,11 +973,9 @@ function showNoBooks() {
     hideEmpty();
     document.getElementById('reader-loading').style.display = 'none';
     document.getElementById('reader-main').style.display = 'none';
-    document.getElementById('reader-actions').style.display = 'none';
     document.getElementById('reader-no-books').style.display = 'block';
     document.getElementById('reader-page-display').textContent = '第 -- 页';
     document.getElementById('reader-subtitle').textContent = '暂无书籍';
-    document.getElementById('reader-progress').innerHTML = '';
 }
 
 function showLoading(msg) {

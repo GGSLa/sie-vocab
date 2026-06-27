@@ -1342,29 +1342,6 @@
 }
 .btn-jump:hover { transform: translateY(-1px); box-shadow: 0 4px 15px rgba(126,200,227,0.3); }
 
-.reader-progress {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    margin-bottom: 20px;
-    color: #6b7280;
-    font-size: 0.85rem;
-    font-weight: 600;
-}
-.progress-bar-bg {
-    flex: 1;
-    height: 6px;
-    background: #e2e4e9;
-    border-radius: 3px;
-    overflow: hidden;
-}
-.progress-bar-fill {
-    height: 100%;
-    background: linear-gradient(90deg, #7ec8e3, #5ba8d0);
-    border-radius: 3px;
-    transition: width 0.3s ease;
-}
-
 .reader-content {
     background: rgba(255,255,255,0.95);
     backdrop-filter: blur(20px);
@@ -1495,38 +1472,6 @@
     font-size: 0.9rem;
     color: #6b7280;
     line-height: 1.6;
-}
-
-/* Reader actions bar */
-.reader-actions {
-    text-align: center;
-}
-.reader-chunk-nav {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 14px;
-    margin-bottom: 14px;
-}
-.btn-chunk-nav {
-    padding: 10px 24px;
-    font-size: 0.9rem;
-    font-weight: 700;
-    border: 2px solid #7ec8e3;
-    border-radius: 12px;
-    cursor: pointer;
-    background: #fff;
-    color: #7ec8e3;
-    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-}
-.btn-chunk-nav:hover { background: #7ec8e3; color: #fff; transform: translateY(-2px); }
-.btn-chunk-nav:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
-
-.reader-chunk-label {
-    font-weight: 800;
-    font-size: 0.95rem;
-    color: #1e1b4b;
-    min-width: 60px;
 }
 
 .reader-error {

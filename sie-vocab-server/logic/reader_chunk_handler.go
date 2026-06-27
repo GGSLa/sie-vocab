@@ -113,16 +113,31 @@ func (h *ReaderChunkHandler) GetChunk(bookID, page int, userID int) (*model.Read
 		}, nil
 	}
 
-	// 4. Cross-page completion
-	pageText = strings.TrimSpace(pageText)
-	if needsCrossPageCompletion(pageText) {
+	// 4. Cross-page paragraph handling
+	// 4a. Check if first paragraph is continuation from previous page → remove it
+	if page > 1 {
+		prevText, err := pdf.ExtractPageTextHybrid(pdfPath, page-1, ocrLang)
+		if err == nil && prevText != "" {
+			lastParaPrev := pdf.GetLastParagraph(prevText)
+			if lastParaPrev != "" && pdf.IsParagraphContinued(lastParaPrev) {
+				trimmed := pdf.RemoveFirstParagraph(pageText)
+				if trimmed != "" {
+					log.Printf("📎 首段归前页: book=%d page=%d, 前页末段未闭合，本页首段移除 %d→%d 字", bookID, page, len(pageText), len(trimmed))
+					pageText = trimmed
+				}
+			}
+		}
+	}
+
+	// 4b. Check if last paragraph continues to next page → append continuation
+	lastParaCurr := pdf.GetLastParagraph(pageText)
+	if lastParaCurr != "" && pdf.IsParagraphContinued(lastParaCurr) {
 		nextText, err := pdf.ExtractPageTextHybrid(pdfPath, page+1, ocrLang)
 		if err == nil && nextText != "" {
-			nextText = strings.TrimSpace(nextText)
-			firstPara := extractFirstBodyParagraph(nextText)
-			if firstPara != "" {
-				pageText += "\n" + firstPara
-				log.Printf("📎 跨页段落补齐: book=%d page=%d, 从 page=%d 取了 %d 字", bookID, page, page+1, len(firstPara))
+			firstParaNext := pdf.GetFirstParagraph(nextText)
+			if firstParaNext != "" {
+				pageText += "\n" + firstParaNext
+				log.Printf("📎 末段跨页补齐: book=%d page=%d, 从 page=%d 取了 %d 字", bookID, page, page+1, len(firstParaNext))
 			}
 		}
 	}
@@ -158,63 +173,6 @@ func (h *ReaderChunkHandler) GetChunk(bookID, page int, userID int) (*model.Read
 
 	log.Printf("✅ reader 分析完成: book=%d page=%d section=%q chunks=%d", bookID, page, result.Section, result.TotalChunks)
 	return result, nil
-}
-
-// ───────── 跨页辅助 ─────────
-
-func needsCrossPageCompletion(pageText string) bool {
-	if pageText == "" || strings.HasSuffix(pageText, "\n\n") {
-		return false
-	}
-	last := lastLine(pageText)
-	if last == "" || strings.HasPrefix(last, "#") {
-		return false
-	}
-	if isSentenceEnd(last) {
-		return false
-	}
-	return true
-}
-
-func isSentenceEnd(s string) bool {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return false
-	}
-	last := s[len(s)-1]
-	return last == '.' || last == '!' || last == '?' || last == '"' || last == ')' || last == ':'
-}
-
-func lastLine(s string) string {
-	lines := strings.Split(strings.TrimSpace(s), "\n")
-	for i := len(lines) - 1; i >= 0; i-- {
-		if strings.TrimSpace(lines[i]) != "" {
-			return lines[i]
-		}
-	}
-	return ""
-}
-
-func extractFirstBodyParagraph(s string) string {
-	lines := strings.Split(s, "\n")
-	var paraLines []string
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" {
-			if len(paraLines) > 0 {
-				break
-			}
-			continue
-		}
-		if strings.HasPrefix(trimmed, "#") {
-			if len(paraLines) > 0 {
-				break
-			}
-			continue
-		}
-		paraLines = append(paraLines, trimmed)
-	}
-	return strings.Join(paraLines, " ")
 }
 
 func parseReaderReply(reply string) (*model.ReaderChunkResponse, error) {

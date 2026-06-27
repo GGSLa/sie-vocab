@@ -1041,3 +1041,78 @@ func parseOutline(d *xml.Decoder, level int) ([]TocItem, error) {
 		}
 	}
 }
+
+// ───────── Cross-page paragraph helpers ─────────
+
+// GetLastParagraph returns the last paragraph block (text after the last \n\n).
+func GetLastParagraph(text string) string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return ""
+	}
+	blocks := strings.Split(text, "\n\n")
+	for i := len(blocks) - 1; i >= 0; i-- {
+		b := strings.TrimSpace(blocks[i])
+		if b != "" {
+			return b
+		}
+	}
+	return ""
+}
+
+// GetFirstParagraph returns the first paragraph block (text before the first \n\n),
+// stripping heading markers (#, ##, ###) from the beginning.
+func GetFirstParagraph(text string) string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return ""
+	}
+	blocks := strings.Split(text, "\n\n")
+	for _, b := range blocks {
+		b = strings.TrimSpace(b)
+		if b == "" {
+			continue
+		}
+		// Strip heading markers from the beginning of lines
+		lines := strings.Split(b, "\n")
+		for len(lines) > 0 {
+			first := strings.TrimSpace(lines[0])
+			if strings.HasPrefix(first, "### ") || strings.HasPrefix(first, "## ") || strings.HasPrefix(first, "# ") {
+				lines = lines[1:]
+			} else {
+				break
+			}
+		}
+		result := strings.TrimSpace(strings.Join(lines, "\n"))
+		if result != "" {
+			return result
+		}
+	}
+	return ""
+}
+
+// RemoveFirstParagraph strips the first paragraph block from the text.
+// Used when the first paragraph is a continuation from the previous page
+// and should only appear on the page where it starts.
+func RemoveFirstParagraph(text string) string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return ""
+	}
+	idx := strings.Index(text, "\n\n")
+	if idx < 0 {
+		return "" // entire page is one continuation paragraph
+	}
+	return strings.TrimSpace(text[idx+2:])
+}
+
+// IsParagraphContinued returns true if the paragraph does not end with
+// sentence-ending punctuation, indicating it likely continues to the next page.
+func IsParagraphContinued(para string) bool {
+	para = strings.TrimSpace(para)
+	if para == "" {
+		return false
+	}
+	last := para[len(para)-1]
+	return last != '.' && last != '!' && last != '?' && last != '"' && last != ')' && last != ':'
+}

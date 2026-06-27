@@ -108,12 +108,10 @@ const ReaderSystemPrompt = `你是一个 SIE（Securities Industry Essentials）
 - section 字段应使用输入文本中 "# " 级别标题的文字内容（去掉 # 前缀），如果输入中没有该级别标题，则使用第一个 "## " 标题
 
 ## 分段规则
-- 将输入文本分为 1 到 3 个 chunk，尽量以 "## " 或 "### " 标题为自然边界
-- 每个 chunk 包含 1 到 3 个自然段落
+- **整页作为 1 个 chunk，不要将文本分段**
 - 每个 chunk 必须有完整意义，不可在句子中间断开
-- 如果输入文本只有一个有效段落，则只输出 1 个 chunk
-- 每个 chunk 的 vocab 包含 3 到 8 个词汇
-- 每个 chunk 的 grammar 包含 1 到 3 个语法点
+- 每个 chunk 的 vocab 包含 5 到 15 个词汇
+- 每个 chunk 的 grammar 包含 2 到 6 个语法点
 - 不要提取人名（如 Steven）和无关冠词/介词作为词汇
 
 ## 铁律（违反即错误）
