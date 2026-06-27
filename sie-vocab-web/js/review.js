@@ -108,10 +108,10 @@ async function fetchRandomWord() {
         document.getElementById('review-stats').style.display = 'none';
         expandBtn.textContent = '🔽 展开详情';
 
-        // 隐藏 loading，确保卡片可见
+        // 隐藏 loading，确保卡片可见（操作按钮等展开后才显示）
         loading.style.display = 'none';
         card.style.display = 'block';
-        actions.style.display = 'flex';
+        actions.style.display = 'none';
     } catch (err) {
         clearTimeout(loadingTimer);
         loading.innerHTML = '<span class="error-msg">❌ 请求失败: ' + esc(err.message) + '</span>';
@@ -121,31 +121,24 @@ async function fetchRandomWord() {
 
 // ==================== 展开/收起 ====================
 
-async function toggleExpand() {
+function toggleExpand() {
     const detail = document.getElementById('review-detail');
     const stats = document.getElementById('review-stats');
     const btn = document.getElementById('btn-expand');
+    const actions = document.getElementById('review-actions');
     expanded = !expanded;
 
     if (expanded) {
         detail.style.display = 'block';
         btn.textContent = '🔼 收起详情';
-        const result = await recordReview();
-        if (result) {
-            let statsHTML = '📊 本词复习：<strong>' + result.word_count + '</strong> 次';
-            if (result.base_count > 0 || (currentWord && currentWord.type === '基础词')) {
-                statsHTML += ' ｜ 词族总计：<strong>' + result.base_count + '</strong> 次';
-            }
-            if (result.next_review_date) {
-                statsHTML += '<br>⏭ 下次复习：<strong>' + formatReviewDate(result.next_review_date) + '</strong>';
-            }
-            stats.style.display = 'block';
-            stats.innerHTML = statsHTML;
-        }
+        // 展开后显示"没记住"/"记住了"按钮
+        actions.style.display = 'flex';
     } else {
         detail.style.display = 'none';
         stats.style.display = 'none';
         btn.textContent = '🔽 展开详情';
+        // 收起时隐藏操作按钮
+        actions.style.display = 'none';
     }
 }
 
@@ -280,9 +273,32 @@ function adjustWordFontSize(el) {
     el.style.fontSize = (Math.floor(newSize * 10) / 10) + 'rem';
 }
 
-// ==================== 下一个 ====================
+// ==================== 记住 / 没记住 ====================
 
-function nextWord() {
+async function markRemembered() {
+    // 记录复习 + 跳转下一个
+    if (currentWordID) {
+        const result = await recordReview();
+        if (result) {
+            // 短暂显示统计信息
+            const stats = document.getElementById('review-stats');
+            let statsHTML = '📊 本词复习：<strong>' + result.word_count + '</strong> 次';
+            if (result.base_count > 0 || (currentWord && currentWord.type === '基础词')) {
+                statsHTML += ' ｜ 词族总计：<strong>' + result.base_count + '</strong> 次';
+            }
+            if (result.next_review_date) {
+                statsHTML += '<br>⏭ 下次复习：<strong>' + formatReviewDate(result.next_review_date) + '</strong>';
+            }
+            stats.style.display = 'block';
+            stats.innerHTML = statsHTML;
+        }
+    }
+    // 稍作延迟让用户看到统计，然后跳下一个
+    setTimeout(() => fetchRandomWord(), 600);
+}
+
+function markForgotten() {
+    // 不记录，直接跳转下一个
     fetchRandomWord();
 }
 

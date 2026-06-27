@@ -712,6 +712,15 @@
             padding: 12px 0;
             margin-bottom: 10px;
         }
+        .review-word-header .badge {
+            font-size: 0.8rem;
+            padding: 4px 14px;
+            border-radius: 14px;
+            font-weight: 700;
+            color: #fff;
+            letter-spacing: 0.3px;
+            display: inline-block;
+        }
 
         /* 操作栏 */
         .review-actions {
@@ -720,7 +729,7 @@
             gap: 14px;
         }
 
-        .btn-next {
+        .btn-remembered {
             padding: 16px 48px;
             font-size: 1.15rem;
             font-weight: 800;
@@ -728,18 +737,42 @@
             border: none;
             border-radius: 14px;
             cursor: pointer;
-            background: linear-gradient(135deg, #7ec8e3 0%, #5ba8d0 100%);
+            background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
             color: #fff;
             transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-            box-shadow: 0 6px 25px rgba(126,200,227,0.4);
+            box-shadow: 0 6px 25px rgba(34,197,94,0.4);
             position: relative;
             top: 0;
         }
-        .btn-next:hover {
+        .btn-remembered:hover {
             transform: translateY(-3px);
-            box-shadow: 0 12px 35px rgba(126,200,227,0.5);
+            box-shadow: 0 12px 35px rgba(34,197,94,0.5);
         }
-        .btn-next:active { transform: translateY(0); }
+        .btn-remembered:active { transform: translateY(0); }
+
+        .btn-forgotten {
+            padding: 16px 48px;
+            font-size: 1.15rem;
+            font-weight: 800;
+            letter-spacing: 0.5px;
+            border: 2px solid rgba(148,163,184,0.4);
+            border-radius: 14px;
+            cursor: pointer;
+            background: rgba(148,163,184,0.12);
+            color: #64748b;
+            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+            box-shadow: 0 4px 16px rgba(148,163,184,0.15);
+            position: relative;
+            top: 0;
+        }
+        .btn-forgotten:hover {
+            transform: translateY(-3px);
+            background: rgba(148,163,184,0.22);
+            border-color: rgba(148,163,184,0.6);
+            color: #475569;
+            box-shadow: 0 8px 25px rgba(148,163,184,0.3);
+        }
+        .btn-forgotten:active { transform: translateY(0); }
 
         /* 全部完成状态 */
         .all-done {
