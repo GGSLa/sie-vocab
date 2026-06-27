@@ -40,6 +40,24 @@ func HandleRegister(h *logic.AuthHandler) http.HandlerFunc {
 	}
 }
 
+// HandleUserInfo 获取当前用户信息（需认证）
+func HandleUserInfo(h *logic.AuthHandler) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "只接受 GET 请求"})
+			return
+		}
+		userID := getUserID(r)
+		resp, err := h.GetUserInfo(userID)
+		if err != nil {
+			log.Printf("❌ 获取用户信息失败 (userID=%d): %v", userID, err)
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "用户不存在"})
+			return
+		}
+		writeJSON(w, http.StatusOK, resp)
+	}
+}
+
 // HandleLogin 用户登录
 func HandleLogin(h *logic.AuthHandler) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

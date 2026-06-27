@@ -13,13 +13,14 @@ import (
 
 // AuthHandler 用户认证业务逻辑
 type AuthHandler struct {
-	userRepo  *repo.UserRepo
-	jwtSecret string
+	userRepo       *repo.UserRepo
+	invitationRepo *repo.InvitationRepo
+	jwtSecret      string
 }
 
 // NewAuthHandler 创建 AuthHandler
-func NewAuthHandler(userRepo *repo.UserRepo, jwtSecret string) *AuthHandler {
-	return &AuthHandler{userRepo: userRepo, jwtSecret: jwtSecret}
+func NewAuthHandler(userRepo *repo.UserRepo, invitationRepo *repo.InvitationRepo, jwtSecret string) *AuthHandler {
+	return &AuthHandler{userRepo: userRepo, invitationRepo: invitationRepo, jwtSecret: jwtSecret}
 }
 
 // Register 注册新用户
@@ -42,6 +43,21 @@ func (h *AuthHandler) Register(username, password string) (*model.RegisterRespon
 		return &model.RegisterResponse{Error: "用户名已被注册"}, nil
 	}
 
+	// 检查邀请：首个用户无需邀请，后续用户必须被邀请
+	hasAny, err := h.invitationRepo.HasAnyUser()
+	if err != nil {
+		return nil, fmt.Errorf("检查用户数失败: %v", err)
+	}
+	var pendingInvitation *model.Invitation
+	if hasAny {
+		// 非首个用户，必须检查邀请
+		inv, err := h.invitationRepo.FindUnusedByUsername(username)
+		if err != nil || inv == nil {
+			return &model.RegisterResponse{Error: "该用户名未被邀请注册，请联系已有用户获取邀请"}, nil
+		}
+		pendingInvitation = inv
+	}
+
 	// 哈希密码
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
@@ -57,12 +73,16 @@ func (h *AuthHandler) Register(username, password string) (*model.RegisterRespon
 		return nil, fmt.Errorf("创建用户失败: %v", err)
 	}
 
+	// 非首个用户：标记邀请为已使用
+	if pendingInvitation != nil {
+		h.invitationRepo.MarkUsed(pendingInvitation.ID)
+	}
+
 	// 如果是第一个用户，将孤儿数据分配给他
 	totalUsers, _ := h.userRepo.CountAll()
 	if totalUsers == 1 {
 		if err := h.userRepo.ClaimOrphanedData(user.ID); err != nil {
 			// 不阻塞注册，仅记录日志
-			// log would be here
 		}
 	}
 
@@ -102,5 +122,18 @@ func (h *AuthHandler) Login(username, password string) (*model.LoginResponse, er
 	return &model.LoginResponse{
 		Token:    token,
 		Username: username,
+	}, nil
+}
+
+// GetUserInfo 获取当前用户信息
+func (h *AuthHandler) GetUserInfo(userID int) (*model.UserInfoResponse, error) {
+	var user model.User
+	err := h.userRepo.FindByID(userID, &user)
+	if err != nil {
+		return nil, fmt.Errorf("用户不存在: %v", err)
+	}
+	return &model.UserInfoResponse{
+		Username:  user.Username,
+		CreatedAt: user.CreatedAt.Format("2006-01-02 15:04:05"),
 	}, nil
 }

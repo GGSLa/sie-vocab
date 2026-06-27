@@ -34,6 +34,11 @@ func (r *UserRepo) Create(user *model.User) error {
 	return r.db.Create(user).Error
 }
 
+// FindByID 按 ID 查找用户
+func (r *UserRepo) FindByID(id int, user *model.User) error {
+	return r.db.Where("id = ?", id).First(user).Error
+}
+
 // CountAll 统计用户总数
 func (r *UserRepo) CountAll() (int, error) {
 	var count int64

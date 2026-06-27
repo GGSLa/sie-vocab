@@ -10,6 +10,8 @@ function setAuthMode(mode) {
     document.getElementById('auth-title').textContent = mode === 'login' ? '🔐 登录' : '✨ 注册';
     document.getElementById('auth-subtitle').textContent = mode === 'login' ? '登录以继续学习' : '创建新账号开始学习';
     document.getElementById('auth-error').style.display = 'none';
+    // 注册模式下显示安全警告
+    document.getElementById('auth-warning').style.display = mode === 'register' ? 'block' : 'none';
 }
 
 async function handleAuth(event) {

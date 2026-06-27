@@ -13,6 +13,8 @@ let lookupMode = 'new';       // 'new' | 'cached' — current modal display mode
 let lookupDBWords = null;     // DB word data when in cached mode
 let lookupAIWords = null;     // AI word data when in new mode (for save)
 let lookupVocabBtnEl = null;  // original vocab table button ref (for updating after diff save)
+let lastLookupWord = '';      // 上次查询的单词 / last looked-up word
+let lastLookupPanelHTML = ''; // 上次面板HTML缓存 / cached panel HTML for quick restore
 
 function esc(s) {
     if (!s) return '';
@@ -274,6 +276,10 @@ async function fetchPage(page) {
     showLoading('正在加载第 ' + page + ' 页…');
     hideError();
     hideEmpty();
+    closeWordPanel(false);  // 翻页时恢复PDF视图，清除返回按钮 / restore PDF view, clear return btn
+    lastLookupWord = '';
+    lastLookupPanelHTML = '';
+    document.getElementById('reader-return-word').style.display = 'none';
     document.getElementById('reader-main').style.display = 'none';
     document.getElementById('reader-actions').style.display = 'none';
 
@@ -559,16 +565,43 @@ async function preloadNextPage(page) {
     }
 }
 
-// ============ Word Lookup Modal ============
+// ============ Word Lookup Panel (left side, replaces PDF image) ============
+
+function showWordPanel() {
+    document.getElementById('reader-return-word').style.display = 'none';
+    document.getElementById('reader-image-container').style.display = 'none';
+    document.getElementById('reader-image-label').style.display = 'none';
+    document.getElementById('reader-word-panel').style.display = 'flex';
+}
+
+function closeWordPanel(showReturnBtn) {
+    // Save current panel state before closing (for return-to-word feature)
+    if (showReturnBtn && lastLookupWord) {
+        lastLookupPanelHTML = document.getElementById('reader-word-panel-body').innerHTML;
+        document.getElementById('return-word-text').textContent = lastLookupWord;
+        document.getElementById('reader-return-word').style.display = 'flex';
+    }
+    document.getElementById('reader-word-panel').style.display = 'none';
+    document.getElementById('reader-image-container').style.display = '';
+    document.getElementById('reader-image-label').style.display = '';
+}
+
+function returnToLastWord() {
+    if (!lastLookupWord || !lastLookupPanelHTML) return;
+    const panelBody = document.getElementById('reader-word-panel-body');
+    panelBody.innerHTML = lastLookupPanelHTML;
+    showWordPanel();
+}
 
 async function lookupWord(el) {
     const word = el.getAttribute('data-word');
     if (!word) return;
 
-    const modal = document.getElementById('word-modal');
-    const modalBody = document.getElementById('word-modal-body');
-    modal.style.display = 'flex';
-    modalBody.innerHTML = '<div class="review-loading">正在查询 <strong>' + esc(word) + '</strong>…</div>';
+    lastLookupWord = word;
+    lastLookupPanelHTML = '';  // will be populated when panel renders
+    const panelBody = document.getElementById('reader-word-panel-body');
+    showWordPanel();
+    panelBody.innerHTML = '<div class="review-loading">正在查询 <strong>' + esc(word) + '</strong>…</div>';
 
     try {
         // Step 1: Check database first (same logic as index page)
@@ -584,15 +617,15 @@ async function lookupWord(el) {
             lookupMode = 'cached';
             lookupDBWords = qData.data.words;
             lookupAIWords = null;
-            modalBody.innerHTML = renderLookupCardCached(qData.data.words);
+            panelBody.innerHTML = renderLookupCardCached(qData.data.words);
         } else {
             // Not in database — call AI
             lookupMode = 'new';
             lookupDBWords = null;
-            await fetchLookupAI(word, modalBody);
+            await fetchLookupAI(word, panelBody);
         }
     } catch (err) {
-        modalBody.innerHTML = '<div class="error-msg">请求失败: ' + esc(err.message) + '</div>';
+        panelBody.innerHTML = '<div class="error-msg">请求失败: ' + esc(err.message) + '</div>';
     }
 }
 
@@ -623,10 +656,10 @@ async function fetchLookupAI(word, modalBody) {
 }
 
 async function retranslateLookupWord() {
-    const modalBody = document.getElementById('word-modal-body');
+    const panelBody = document.getElementById('reader-word-panel-body');
     if (!lookupDBWords || lookupDBWords.length === 0) return;
     const word = lookupDBWords[0].word;
-    await fetchLookupAIForDiff(word, modalBody);
+    await fetchLookupAIForDiff(word, panelBody);
 }
 
 // Fetch AI for diff comparison — renders old DB vs new AI side by side
@@ -828,15 +861,15 @@ async function saveVocabWord(index, btnEl) {
                 examples: v.example ? [{en: v.example, zh: ''}] : []
             };
 
-            // Set state and show diff in modal
+            // Set state and show diff in panel
             lookupMode = 'diff-vocab';
             lookupDBWords = qData.data.words;
             lookupAIWords = [vocabEntry];
+            lastLookupWord = v.word;
 
-            const modal = document.getElementById('word-modal');
-            const modalBody = document.getElementById('word-modal-body');
-            modal.style.display = 'flex';
-            modalBody.innerHTML = renderLookupCardDiff(qData.data.words, [vocabEntry], '💾 覆盖保存');
+            const panelBody = document.getElementById('reader-word-panel-body');
+            showWordPanel();
+            panelBody.innerHTML = renderLookupCardDiff(qData.data.words, [vocabEntry], '💾 覆盖保存');
             return;
         }
     } catch (err) {
@@ -924,9 +957,9 @@ async function saveLookupWord(index, btnEl) {
 
 async function saveAllLookupWords() {
     if (!lookupAIWords || lookupAIWords.length === 0) return;
-    const allBtns = document.querySelectorAll('#word-modal-body .btn-save, #word-modal-body .btn-save-all');
+    const allBtns = document.querySelectorAll('#reader-word-panel-body .btn-save, #reader-word-panel-body .btn-save-all');
     allBtns.forEach(b => { b.disabled = true; });
-    const saveAllBtn = document.querySelector('#word-modal-body .btn-save-all');
+    const saveAllBtn = document.querySelector('#reader-word-panel-body .btn-save-all');
     if (saveAllBtn) { saveAllBtn.textContent = '保存中…'; saveAllBtn.disabled = true; }
 
     try {
@@ -939,7 +972,7 @@ async function saveAllLookupWords() {
         if (data.success) {
             if (saveAllBtn) { saveAllBtn.textContent = '✅ 全部已保存 (' + data.count + ')'; }
             // Update all individual save buttons
-            document.querySelectorAll('#word-modal-body .btn-save').forEach(b => {
+            document.querySelectorAll('#reader-word-panel-body .btn-save').forEach(b => {
                 b.textContent = '已保存';
                 b.className = 'btn-save saved';
                 b.disabled = true;

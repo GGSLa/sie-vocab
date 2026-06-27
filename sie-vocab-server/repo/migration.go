@@ -134,6 +134,22 @@ func AutoMigrate(db *gorm.DB) error {
 		safeExec(db, "ALTER TABLE reader_progress ADD PRIMARY KEY (user_id, book_id)", "reader_progress.pk")
 	}
 
+	// ── 3. 创建 invitations 表 ──
+	if err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS invitations (
+			id INT AUTO_INCREMENT PRIMARY KEY,
+			inviter_user_id INT NOT NULL,
+			invited_username VARCHAR(100) NOT NULL,
+			used TINYINT(1) NOT NULL DEFAULT 0,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE INDEX idx_invitations_username (invited_username),
+			INDEX idx_invitations_inviter (inviter_user_id)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+	`).Error; err != nil {
+		return fmt.Errorf("创建 invitations 表失败: %v", err)
+	}
+	log.Println("✅ invitations 表就绪")
+
 	log.Println("✅ 数据库迁移完成")
 	return nil
 }

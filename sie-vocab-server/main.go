@@ -53,6 +53,7 @@ func main() {
 	bookRepo := repo.NewBookRepo(db)
 	progressRepo := repo.NewReaderProgressRepo(db)
 	userRepo := repo.NewUserRepo(db)
+	invitationRepo := repo.NewInvitationRepo(db)
 
 	// ── Logic 层 ──
 	chatHandler := logic.NewChatHandler(cfg.DeepSeekAPIKey)
@@ -69,7 +70,8 @@ func main() {
 	readerTOCHandler := logic.NewReaderTOCHandler(bookRepo, readerCacheRepo)
 	readerPageImageHandler := logic.NewReaderPageImageHandler(bookRepo)
 	bookshelfHandler := logic.NewBookshelfHandler(bookRepo, progressRepo, readerCacheRepo, cfg.UploadDir, cfg.OCRLanguage)
-	authHandler := logic.NewAuthHandler(userRepo, cfg.JWTSecret)
+	authHandler := logic.NewAuthHandler(userRepo, invitationRepo, cfg.JWTSecret)
+	inviteHandler := logic.NewInviteHandler(invitationRepo, userRepo)
 
 	// 消除未使用变量警告（部分 repo 仅在 WordFamilyRepo 内部使用）
 	_ = wordRepo
@@ -122,6 +124,10 @@ func main() {
 	// ── 认证路由（无需 JWT） ──
 	http.HandleFunc("/api/auth/register", service.HandleRegister(authHandler))
 	http.HandleFunc("/api/auth/login", service.HandleLogin(authHandler))
+
+	// ── 用户路由（需 JWT） ──
+	http.HandleFunc("/api/user/info", withAuth(service.HandleUserInfo(authHandler)))
+	http.HandleFunc("/api/invite", withAuth(service.HandleInvite(inviteHandler)))
 
 	// ── API 路由（JWT 认证保护） ──
 	http.HandleFunc("/api/chat", withAuth(service.HandleChat(chatHandler)))
