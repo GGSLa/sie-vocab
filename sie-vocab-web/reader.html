@@ -7,7 +7,7 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
-    <link rel="stylesheet" href="/css/style.css?v=45">
+    <link rel="stylesheet" href="/css/style.css?v=49">
 </head>
 <body>
 <div class="wrapper-wide">
@@ -58,9 +58,14 @@
             <span>☰</span>
             <span class="toc-tab-label">目录</span>
         </div>
-        <!-- 左侧：PDF 原页图片 / 单词查询面板（切换显示） -->
+        <!-- 左侧：PDF 原页图片 / 单词查询面板 / 句子拆解面板（切换显示） -->
         <div class="reader-left">
-            <div class="reader-image-label" id="reader-image-label">PDF 原页</div>
+            <!-- 三模式切换栏 -->
+            <div class="reader-left-toggle" id="reader-left-toggle">
+                <button class="reader-toggle-btn active" data-panel="pdf" onclick="switchLeftPanel('pdf')">📄 PDF</button>
+                <button class="reader-toggle-btn" data-panel="word" onclick="switchLeftPanel('word')">📖 单词</button>
+                <button class="reader-toggle-btn" data-panel="breakdown" onclick="switchLeftPanel('breakdown')">🔍 句子</button>
+            </div>
             <div id="reader-return-word" class="reader-return-word" style="display:none;" onclick="returnToLastWord()">
                 <span class="return-word-icon">🔍</span>
                 <span class="return-word-label">返回单词翻译</span>
@@ -72,9 +77,14 @@
             <div id="reader-word-panel" class="reader-word-panel" style="display:none;">
                 <div class="reader-word-panel-header">
                     <span class="reader-word-panel-title">📖 单词查询</span>
-                    <button class="reader-word-panel-close" onclick="closeWordPanel(true)">✕ 返回PDF</button>
                 </div>
                 <div id="reader-word-panel-body" class="reader-word-panel-body"></div>
+            </div>
+            <div id="reader-breakdown-panel" class="reader-word-panel" style="display:none;">
+                <div class="reader-word-panel-header">
+                    <span class="reader-word-panel-title">🔍 句子拆解</span>
+                </div>
+                <div id="reader-breakdown-panel-body" class="reader-word-panel-body"></div>
             </div>
         </div>
 
@@ -139,6 +149,6 @@
 </div>
 
 <script src="/js/auth.js?v=1"></script>
-<script src="/js/reader.js?v=42"></script>
+<script src="/js/reader.js?v=45"></script>
 </body>
 </html>

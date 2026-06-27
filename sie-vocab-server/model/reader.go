@@ -57,3 +57,41 @@ type ReaderChunkRequest struct {
 	BookID int `json:"book_id"`
 	Page   int `json:"page"`
 }
+
+// ────────── 句子拆解 ──────────
+
+// BreakdownSentenceRequest 句子拆解请求
+type BreakdownSentenceRequest struct {
+	Sentence string `json:"sentence"`
+}
+
+// BreakdownWord 逐词分析条目
+type BreakdownWord struct {
+	Word    string `json:"word"`
+	Pos     string `json:"pos"`
+	Meaning string `json:"meaning"`
+}
+
+// BreakdownPhrase 短语分析条目
+type BreakdownPhrase struct {
+	Phrase  string `json:"phrase"`
+	Meaning string `json:"meaning"`
+	Note    string `json:"note"`
+}
+
+// BreakdownGrammar 语法分析条目
+type BreakdownGrammar struct {
+	Point  string `json:"point"`
+	Detail string `json:"detail"`
+}
+
+// BreakdownSentenceResponse 句子拆解响应
+type BreakdownSentenceResponse struct {
+	Sentence    string             `json:"sentence"`
+	Translation string             `json:"translation"`
+	Vocabulary  []BreakdownWord    `json:"vocabulary"`
+	Phrases     []BreakdownPhrase  `json:"phrases"`
+	Grammar     []BreakdownGrammar `json:"grammar"`
+	UsageNotes  string             `json:"usage_notes"`
+	Error       string             `json:"error,omitempty"`
+}

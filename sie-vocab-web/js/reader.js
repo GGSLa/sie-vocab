@@ -14,13 +14,16 @@ let lookupAIWords = null;     // AI word data when in new mode (for save)
 let lookupVocabBtnEl = null;  // original vocab table button ref (for updating after diff save)
 let lastLookupWord = '';      // 上次查询的单词 / last looked-up word
 let lastLookupPanelHTML = ''; // 上次面板HTML缓存 / cached panel HTML for quick restore
+let activePanel = 'pdf';      // 'pdf' | 'word' | 'breakdown' — current left panel mode
+let lastBreakdownHTML = '';   // 上次句子拆解HTML缓存 / cached breakdown HTML
+let lastBreakdownSentence = ''; // 上次拆解的句子文本
 
 function esc(s) {
     if (!s) return '';
     return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-window.addEventListener('DOMContentLoaded', () => { requireAuth(); loadProgress(); });
+window.addEventListener('DOMContentLoaded', () => { requireAuth(); loadProgress(); initBreakdownUI(); });
 
 // ============ Progress ============
 
@@ -275,8 +278,14 @@ async function fetchPage(page) {
     closeWordPanel(false);  // 翻页时恢复PDF视图，清除返回按钮 / restore PDF view, clear return btn
     lastLookupWord = '';
     lastLookupPanelHTML = '';
+    lastBreakdownHTML = '';
+    lastBreakdownSentence = '';
+    hideBreakdownBtn();
+    switchLeftPanel('pdf');
     document.getElementById('reader-return-word').style.display = 'none';
     document.getElementById('reader-main').style.display = 'none';
+    // Clear breakdown panel content
+    document.getElementById('reader-breakdown-panel-body').innerHTML = '';
 
     // 立即加载左侧 PDF 图片，不等待右侧 chunk API 返回 / Load PDF image immediately; don't wait for chunk API
     loadPageImage(page);
@@ -517,15 +526,48 @@ async function preloadNextPage(page) {
     }
 }
 
-// ============ Word Lookup Panel (left side, replaces PDF image) ============
+// ============ Left Panel Toggle (3-way: PDF / Word / Breakdown) ============
 
-function showWordPanel() {
-    document.getElementById('reader-return-word').style.display = 'none';
-    document.getElementById('reader-image-container').style.display = 'none';
-    document.getElementById('reader-image-label').style.display = 'none';
-    document.getElementById('reader-word-panel').style.display = 'flex';
+function switchLeftPanel(panel) {
+    activePanel = panel;
+    const pdfContainer = document.getElementById('reader-image-container');
+    const wordPanel = document.getElementById('reader-word-panel');
+    const breakdownPanel = document.getElementById('reader-breakdown-panel');
+    const returnBtn = document.getElementById('reader-return-word');
+    const toggleBtns = document.querySelectorAll('.reader-toggle-btn');
+
+    // Hide all panels
+    pdfContainer.style.display = 'none';
+    wordPanel.style.display = 'none';
+    breakdownPanel.style.display = 'none';
+    if (returnBtn) returnBtn.style.display = 'none';
+
+    // Show selected panel
+    if (panel === 'pdf') {
+        pdfContainer.style.display = '';
+        // Show return-to-word button if there's a cached word lookup
+        if (lastLookupWord && lastLookupPanelHTML) {
+            returnBtn.style.display = 'flex';
+        }
+    } else if (panel === 'word') {
+        wordPanel.style.display = 'flex';
+    } else if (panel === 'breakdown') {
+        breakdownPanel.style.display = 'flex';
+    }
+
+    // Update toggle button active state
+    toggleBtns.forEach(b => {
+        b.classList.toggle('active', b.getAttribute('data-panel') === panel);
+    });
 }
 
+// Legacy: called by word lookup when user clicks a word
+function showWordPanel() {
+    document.getElementById('reader-return-word').style.display = 'none';
+    switchLeftPanel('word');
+}
+
+// Legacy: called when user closes the word panel to return to PDF
 function closeWordPanel(showReturnBtn) {
     // Save current panel state before closing (for return-to-word feature)
     if (showReturnBtn && lastLookupWord) {
@@ -533,9 +575,7 @@ function closeWordPanel(showReturnBtn) {
         document.getElementById('return-word-text').textContent = lastLookupWord;
         document.getElementById('reader-return-word').style.display = 'flex';
     }
-    document.getElementById('reader-word-panel').style.display = 'none';
-    document.getElementById('reader-image-container').style.display = '';
-    document.getElementById('reader-image-label').style.display = '';
+    switchLeftPanel('pdf');
 }
 
 function returnToLastWord() {
@@ -958,6 +998,174 @@ function speakWordInline(el) {
     u.onend = () => el.classList.remove('speaking');
     u.onerror = () => el.classList.remove('speaking');
     window.speechSynthesis.speak(u);
+}
+
+// ============ Sentence Breakdown (selection → floating button → API → left panel) ============
+
+let breakdownBtn = null;   // floating breakdown button element
+let lastSelection = '';    // last selected text
+
+function initBreakdownUI() {
+    // Create floating breakdown button (hidden by default)
+    if (breakdownBtn) return;
+    breakdownBtn = document.createElement('div');
+    breakdownBtn.className = 'breakdown-float-btn';
+    breakdownBtn.innerHTML = '🔍 拆解句子';
+    breakdownBtn.style.display = 'none';
+    breakdownBtn.onclick = function(e) {
+        e.stopPropagation();
+        breakdownSentence(lastSelection);
+        hideBreakdownBtn();
+    };
+    document.body.appendChild(breakdownBtn);
+
+    // Listen for text selection on the right panel (reader-en / reader-zh blocks)
+    const rightPanel = document.querySelector('.reader-right');
+    if (rightPanel) {
+        rightPanel.addEventListener('mouseup', onRightPanelMouseUp);
+    }
+    // Also listen on the entire document to detect clicks outside selection
+    document.addEventListener('mousedown', onGlobalMouseDown);
+}
+
+function onRightPanelMouseUp(e) {
+    // Debounce - wait a frame for selection to be available
+    setTimeout(() => {
+        const sel = window.getSelection();
+        const text = (sel ? sel.toString().trim() : '');
+        if (!text || text.length < 2) {
+            hideBreakdownBtn();
+            return;
+        }
+        // Has spaces → multi-word selection (sentence/phrase)
+        if (!text.includes(' ')) {
+            // Single word without spaces — don't show breakdown button
+            hideBreakdownBtn();
+            return;
+        }
+        // Save selection and position the button near the last selected word
+        lastSelection = text;
+        const range = sel.getRangeAt(0);
+        // Collapse to end to get the last character's position (stays near last word)
+        const endRange = range.cloneRange();
+        endRange.collapse(false);
+        const rect = endRange.getBoundingClientRect();
+        // Position button below the selection end, clamped to viewport
+        let top = rect.bottom + 8;
+        let left = rect.right - 100;
+        if (left < 10) left = rect.left;
+        if (top > window.innerHeight - 50) top = rect.top - 42;
+        if (left + 140 > window.innerWidth) left = window.innerWidth - 150;
+        breakdownBtn.style.top = top + 'px';
+        breakdownBtn.style.left = left + 'px';
+        breakdownBtn.style.display = 'flex';
+    }, 10);
+}
+
+function onGlobalMouseDown(e) {
+    // Hide the floating button if click is outside the button itself
+    if (breakdownBtn && e.target !== breakdownBtn && !breakdownBtn.contains(e.target)) {
+        hideBreakdownBtn();
+    }
+}
+
+function hideBreakdownBtn() {
+    if (breakdownBtn) {
+        breakdownBtn.style.display = 'none';
+    }
+    lastSelection = '';
+}
+
+async function breakdownSentence(text) {
+    if (!text) return;
+    lastBreakdownSentence = text;
+    const panelBody = document.getElementById('reader-breakdown-panel-body');
+    switchLeftPanel('breakdown');
+    panelBody.innerHTML = '<div class="review-loading">正在拆解句子…<br><small style="color:#94a3b8">AI 正在深度分析语法结构、短语搭配和用词习惯</small></div>';
+
+    try {
+        const res = await apiFetch('/api/reader/breakdown-sentence', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({sentence: text})
+        });
+        const data = await res.json();
+
+        if (data.error) {
+            panelBody.innerHTML = '<div class="error-msg">拆解失败: ' + esc(data.error) + '</div>';
+            return;
+        }
+
+        lastBreakdownHTML = renderBreakdown(data);
+        panelBody.innerHTML = lastBreakdownHTML;
+    } catch (err) {
+        panelBody.innerHTML = '<div class="error-msg">请求失败: ' + esc(err.message) + '</div>';
+    }
+}
+
+function renderBreakdown(data) {
+    let html = '';
+
+    // 原句 + 翻译
+    html += '<div class="breakdown-section">';
+    html += '<div class="breakdown-sentence-en">' + esc(data.sentence) + '</div>';
+    html += '<div class="breakdown-translation">' + esc(data.translation) + '</div>';
+    html += '</div>';
+
+    // 语法分析（紧跟翻译，帮助理解句子结构）
+    if (data.grammar && data.grammar.length > 0) {
+        html += '<div class="breakdown-section">';
+        html += '<div class="breakdown-section-title">📐 语法结构 / Grammar</div>';
+        data.grammar.forEach(g => {
+            html += '<div class="breakdown-grammar-item">' +
+                '<div class="breakdown-grammar-point"><strong>' + esc(g.point) + '</strong></div>' +
+                '<div class="breakdown-grammar-detail">' + esc(g.detail) + '</div>' +
+                '</div>';
+        });
+        html += '</div>';
+    }
+
+    // 逐词分析
+    if (data.vocabulary && data.vocabulary.length > 0) {
+        html += '<div class="breakdown-section">';
+        html += '<div class="breakdown-section-title">📝 逐词解析 / Word by Word</div>';
+        html += '<div class="breakdown-vocab-list">';
+        data.vocabulary.forEach(v => {
+            html += '<span class="breakdown-vocab-item">' +
+                '<strong>' + esc(v.word) + '</strong>' +
+                ' <span class="breakdown-vocab-pos">' + esc(v.pos) + '</span> ' +
+                esc(v.meaning) +
+                '</span>';
+        });
+        html += '</div>';
+        html += '</div>';
+    }
+
+    // 短语分析
+    if (data.phrases && data.phrases.length > 0) {
+        html += '<div class="breakdown-section">';
+        html += '<div class="breakdown-section-title">🔗 短语与搭配 / Phrases & Collocations</div>';
+        data.phrases.forEach(p => {
+            html += '<div class="breakdown-phrase-item">' +
+                '<div class="breakdown-phrase-text">' + esc(p.phrase) + '</div>' +
+                '<div class="breakdown-phrase-meaning">' + esc(p.meaning) + '</div>';
+            if (p.note) {
+                html += '<div class="breakdown-phrase-note">' + esc(p.note) + '</div>';
+            }
+            html += '</div>';
+        });
+        html += '</div>';
+    }
+
+    // 使用习惯与文化（最后，扩展阅读）
+    if (data.usage_notes && data.usage_notes.trim() && data.usage_notes !== '无' && data.usage_notes !== '无特殊情况') {
+        html += '<div class="breakdown-section">';
+        html += '<div class="breakdown-section-title">💡 使用习惯与文化 / Usage & Culture</div>';
+        html += '<div class="breakdown-usage-notes">' + esc(data.usage_notes) + '</div>';
+        html += '</div>';
+    }
+
+    return html || '<div class="error-msg">AI 返回了空结果</div>';
 }
 
 function closeModal(event) {

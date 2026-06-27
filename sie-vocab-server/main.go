@@ -66,6 +66,7 @@ func main() {
 	reviewFreeRecordHandler := logic.NewReviewFreeRecordHandler(familyRepo, freeReviewLogRepo)
 	overviewHandler := logic.NewOverviewHandler(familyRepo)
 	readerChunkHandler := logic.NewReaderChunkHandler(cfg.DeepSeekAPIKey, bookRepo, readerCacheRepo)
+	readerBreakdownHandler := logic.NewReaderBreakdownHandler(cfg.DeepSeekAPIKey)
 	readerProgressHandler := logic.NewReaderProgressHandler(progressRepo, bookRepo)
 	readerTOCHandler := logic.NewReaderTOCHandler(bookRepo, readerCacheRepo)
 	readerPageImageHandler := logic.NewReaderPageImageHandler(bookRepo)
@@ -143,6 +144,7 @@ func main() {
 	http.HandleFunc("/api/reader/last-book", withAuth(service.HandleReaderDefaultBook(readerProgressHandler)))
 	http.HandleFunc("/api/reader/progress", withAuth(service.HandleReaderProgress(readerProgressHandler)))
 	http.HandleFunc("/api/reader/toc", withAuth(service.HandleReaderTOC(readerTOCHandler)))
+	http.HandleFunc("/api/reader/breakdown-sentence", withAuth(service.HandleReaderBreakdownSentence(readerBreakdownHandler)))
 	http.HandleFunc("/api/reader/page-image", withAuth(service.HandleReaderPageImage(readerPageImageHandler)))
 
 	// 书架

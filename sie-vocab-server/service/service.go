@@ -393,6 +393,32 @@ func HandleReaderTOC(h *logic.ReaderTOCHandler) http.HandlerFunc {
 	}
 }
 
+// HandleReaderBreakdownSentence 句子深度拆解（不缓存，实时调 AI）
+func HandleReaderBreakdownSentence(h *logic.ReaderBreakdownHandler) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "只接受 POST 请求"})
+			return
+		}
+		var req model.BreakdownSentenceRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Sentence == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "请求格式错误或 sentence 为空"})
+			return
+		}
+		if len(req.Sentence) > 2000 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "句子过长，请选中 2000 字符以内的文本"})
+			return
+		}
+		result, err := h.Breakdown(req.Sentence)
+		if err != nil {
+			log.Printf("❌ 句子拆解失败: %v", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "拆解失败，请稍后重试"})
+			return
+		}
+		writeJSON(w, http.StatusOK, result)
+	}
+}
+
 // HandleReaderPageImage PDF 页图片渲染
 func HandleReaderPageImage(h *logic.ReaderPageImageHandler) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
