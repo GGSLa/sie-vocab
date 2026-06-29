@@ -2,6 +2,8 @@
 // 提供 token 管理、apiFetch 封装、logout、requireAuth
 
 const TOKEN_KEY = 'sie_vocab_token';
+// nginx sub-path prefix
+const BASE_PATH = '/sie';
 
 // Token 管理
 function getToken() { return localStorage.getItem(TOKEN_KEY); }
@@ -16,7 +18,7 @@ function isAuthenticated() { return !!getToken(); }
 async function apiFetch(url, options = {}) {
     const token = getToken();
     if (!token) {
-        window.location.href = '/login.html';
+        window.location.href = BASE_PATH + '/login.html';
         // 页面即将跳转，后续代码不会执行
         throw new Error('未登录');
     }
@@ -26,7 +28,7 @@ async function apiFetch(url, options = {}) {
     const response = await fetch(url, options);
     if (response.status === 401) {
         clearToken();
-        window.location.href = '/login.html';
+        window.location.href = BASE_PATH + '/login.html';
         throw new Error('登录已过期');
     }
     return response;
@@ -35,12 +37,13 @@ async function apiFetch(url, options = {}) {
 // 登出
 function logout() {
     clearToken();
-    window.location.href = '/login.html';
+    window.location.href = BASE_PATH + '/login.html';
 }
 
 // 页面级认证检查 — 在 DOMContentLoaded 时调用
 function requireAuth() {
     if (!isAuthenticated()) {
-        window.location.href = '/login.html';
+        window.location.href = BASE_PATH + '/login.html';
     }
 }
+

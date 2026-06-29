@@ -83,7 +83,7 @@ function renderBooks() {
 
 // ── 打开书籍 ──
 function openBook(id) {
-    window.location.href = `/reader.html?book=${id}`;
+    window.location.href = BASE_PATH + `/reader.html?book=${id}`;
 }
 
 // ── 删除书籍 ──
@@ -241,3 +241,4 @@ function escHtml(s) {
     if (!s) return '';
     return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#x27;');
 }
+

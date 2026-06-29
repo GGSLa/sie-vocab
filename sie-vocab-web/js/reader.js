@@ -520,7 +520,7 @@ async function preloadNextPage(page) {
 
         // Also preload the PDF page image
         const img = new Image();
-        img.src = '/api/reader/page-image?book=' + currentBookId + '&page=' + page + '&token=' + encodeURIComponent(getToken());
+        img.src = BASE_PATH + '/api/reader/page-image?book=' + currentBookId + '&page=' + page + '&token=' + encodeURIComponent(getToken());
     } catch (e) {
         // Silently ignore preload errors
     }
@@ -1210,3 +1210,4 @@ function showEmpty(msg) {
     el.style.display = 'block';
 }
 function hideEmpty() { document.getElementById('reader-empty').style.display = 'none'; }
+

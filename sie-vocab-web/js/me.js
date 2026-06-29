@@ -112,7 +112,7 @@ function showInviteMsg(text, type) {
 function handleLogout() {
     if (confirm('确定要退出登录吗？\nAre you sure you want to logout?')) {
         clearToken();
-        window.location.href = '/login.html';
+        window.location.href = BASE_PATH + '/login.html';
     }
 }
 
@@ -121,3 +121,4 @@ function escHtml(s) {
     if (!s) return '';
     return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#x27;');
 }
+
