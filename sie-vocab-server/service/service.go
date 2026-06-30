@@ -157,6 +157,14 @@ func HandleReviewRandom(h *logic.ReviewRandomHandler) http.HandlerFunc {
 			})
 			return
 		}
+		// 批次完成（非错误，是正常状态）
+		if resp.BatchDone {
+			writeJSON(w, http.StatusOK, map[string]interface{}{
+				"batch_done": true,
+				"can_more":   resp.CanMore,
+			})
+			return
+		}
 		log.Printf("🎲 复习抽词: %s (id=%d)", resp.Word.Word, resp.WordID)
 		writeJSON(w, http.StatusOK, resp)
 	}
@@ -181,14 +189,39 @@ func HandleReviewRecord(h *logic.ReviewRecordHandler) http.HandlerFunc {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "记录复习失败"})
 			return
 		}
-		log.Printf("📝 已记录复习: word_id=%d (词:%d 族:%d 下次:%s)",
-			req.WordID, result.WordCount, result.BaseCount, result.NextDate)
+		log.Printf("📝 已记录复习: word_id=%d (词:%d 族:%d 下次:%s 批次剩余:%d)",
+			req.WordID, result.WordCount, result.BaseCount, result.NextDate, result.BatchRemaining)
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"success":          true,
 			"word_count":       result.WordCount,
 			"base_count":       result.BaseCount,
 			"next_review_date": result.NextDate,
+			"batch_remaining":  result.BatchRemaining,
 		})
+	}
+}
+
+// ────────── 复习 — 自由模式 ──────────
+
+// HandleReviewNextBatch "再来一批"生成新词池
+func HandleReviewNextBatch(h *logic.ReviewNextBatchHandler) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "只接受 POST 请求"})
+			return
+		}
+		userID := getUserID(r)
+		resp, err := h.NextBatch(userID)
+		if err != nil {
+			log.Printf("❌ 生成下一批失败: %v", err)
+			writeJSON(w, http.StatusOK, map[string]interface{}{
+				"error":    "没有更多可复习的单词",
+				"all_done": true,
+			})
+			return
+		}
+		log.Printf("📦 新一批复习词池: 首词 %s (id=%d)", resp.Word.Word, resp.WordID)
+		writeJSON(w, http.StatusOK, resp)
 	}
 }
 

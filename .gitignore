@@ -16,3 +16,6 @@ CLAUDE.md
 *.jpg
 sie-vocab-bin/config-test.json
 sie-vocab-web/css/style.css.bak
+
+# 部署脚本（含密码）
+deploy.py

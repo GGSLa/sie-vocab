@@ -7,7 +7,7 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
-    <link rel="stylesheet" href="/css/style.css?v=40">
+    <link rel="stylesheet" href="/css/style.css?v=42">
 </head>
 <body>
 <div class="wrapper-review">
@@ -47,8 +47,14 @@
 
         <!-- 操作栏（展开详情后显示） -->
         <div class="review-actions" style="display:none;" id="review-actions">
-            <button class="btn-forgotten" onclick="markForgotten()">😐 没记住</button>
-            <button class="btn-remembered" onclick="markRemembered()">✅ 记住了</button>
+            <span id="actions-daily">
+                <button class="btn-forgotten" onclick="markForgotten()">😐 没记住</button>
+                <button class="btn-remembered" onclick="markRemembered()">✅ 记住了</button>
+                <button class="btn-next-batch" id="btn-next-batch" onclick="requestNextBatch()" style="display:none;">📦 再来一批</button>
+            </span>
+            <span id="actions-free" style="display:none;">
+                <button class="btn-next" onclick="nextWord()">➡️ 下一个</button>
+            </span>
         </div>
 
         <!-- 总览模式 -->
@@ -88,6 +94,6 @@
 </div>
 
 <script src="/js/auth.js?v=3"></script>
-<script src="/js/review.js?v=21"></script>
+<script src="/js/review.js?v=23"></script>
 </body>
 </html>

@@ -43,8 +43,8 @@ func (r *ReviewLogRepo) InsertIgnore(wordID int, userID int) (int64, error) {
 	return result.RowsAffected, result.Error
 }
 
-// HasReviewedToday 检查某单词族今日是否已复习过
-func (r *ReviewLogRepo) HasReviewedToday(w *WordRepo, userID int) ([]string, error) {
+// GetReviewedFamilies 获取今日已复习过的所有词族根（用于排除）
+func (r *ReviewLogRepo) GetReviewedFamilies(userID int) ([]string, error) {
 	today := Today4AM()
 	var roots []string
 	err := r.db.Model(&ReviewLog{}).

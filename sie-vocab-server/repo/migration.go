@@ -150,6 +150,27 @@ func AutoMigrate(db *gorm.DB) error {
 	}
 	log.Println("✅ invitations 表就绪")
 
+	// ── 4. 创建 daily_word_pool 表 ──
+	if err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS daily_word_pool (
+			id BIGINT AUTO_INCREMENT PRIMARY KEY,
+			user_id INT NOT NULL,
+			pool_date DATE NOT NULL,
+			batch_num INT NOT NULL DEFAULT 1,
+			word_id INT NOT NULL,
+			word VARCHAR(100) NOT NULL,
+			family_root VARCHAR(100) NOT NULL,
+			is_due TINYINT(1) NOT NULL DEFAULT 1,
+			sort_order INT NOT NULL DEFAULT 0,
+			drawn TINYINT(1) NOT NULL DEFAULT 0,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			INDEX idx_lookup (user_id, pool_date, batch_num, drawn)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+	`).Error; err != nil {
+		return fmt.Errorf("创建 daily_word_pool 表失败: %v", err)
+	}
+	log.Println("✅ daily_word_pool 表就绪")
+
 	log.Println("✅ 数据库迁移完成")
 	return nil
 }

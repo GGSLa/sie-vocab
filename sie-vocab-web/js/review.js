@@ -76,6 +76,21 @@ async function fetchRandomWord() {
 
         clearTimeout(loadingTimer);
 
+        // 批次完成（非错误）
+        if (data.batch_done) {
+            loading.style.display = 'none';
+            card.style.display = 'none';
+            actions.style.display = 'none';
+            loading.style.display = 'flex';
+            loading.innerHTML = '<div class="all-done">' +
+                '<div class="all-done-icon">🎉</div>' +
+                '<div class="all-done-title">本批 30 词已完成</div>' +
+                '<div class="all-done-sub">' + (data.can_more ? '还有单词可以复习，要来一批吗？' : '所有单词都已复习完毕，明天再来！') + '</div>' +
+                (data.can_more ? '<button class="btn-mode-switch" onclick="requestNextBatch()">📦 再来一批</button>' : '') +
+                '</div>';
+            return;
+        }
+
         if (data.error) {
             loading.style.display = 'none';
             if (data.all_done && currentMode === 'daily') {
@@ -112,6 +127,10 @@ async function fetchRandomWord() {
         loading.style.display = 'none';
         card.style.display = 'block';
         actions.style.display = 'none';
+        // 重置每日模式按钮状态
+        document.getElementById('actions-daily').querySelector('.btn-forgotten').style.display = '';
+        document.getElementById('actions-daily').querySelector('.btn-remembered').style.display = '';
+        document.getElementById('btn-next-batch').style.display = 'none';
     } catch (err) {
         clearTimeout(loadingTimer);
         loading.innerHTML = '<span class="error-msg">❌ 请求失败: ' + esc(err.message) + '</span>';
@@ -131,8 +150,10 @@ function toggleExpand() {
     if (expanded) {
         detail.style.display = 'block';
         btn.textContent = '🔼 收起详情';
-        // 展开后显示"没记住"/"记住了"按钮
+        // 展开后按模式显示不同按钮
         actions.style.display = 'flex';
+        document.getElementById('actions-daily').style.display = currentMode === 'free' ? 'none' : '';
+        document.getElementById('actions-free').style.display = currentMode === 'free' ? '' : 'none';
     } else {
         detail.style.display = 'none';
         stats.style.display = 'none';
@@ -301,6 +322,14 @@ async function markRemembered() {
             }
             stats.style.display = 'block';
             stats.innerHTML = statsHTML;
+
+            // 批次耗尽 → 显示"再来一批"
+            if (result.batch_remaining === 0) {
+                document.getElementById('actions-daily').querySelector('.btn-forgotten').style.display = 'none';
+                document.getElementById('actions-daily').querySelector('.btn-remembered').style.display = 'none';
+                document.getElementById('btn-next-batch').style.display = '';
+                return; // 不自动跳下一个，等用户点击"再来一批"
+            }
         }
     }
     // 稍作延迟让用户看到统计，然后跳下一个
@@ -310,6 +339,68 @@ async function markRemembered() {
 function markForgotten() {
     // 不记录，直接跳转下一个
     fetchRandomWord();
+}
+
+function nextWord() {
+    // 自由模式：直接跳下一个
+    fetchRandomWord();
+}
+
+async function requestNextBatch() {
+    // 每日模式：请求下一批 30 词
+    const loading = document.getElementById('review-loading');
+    const card = document.getElementById('review-card');
+    const actions = document.getElementById('review-actions');
+    const btnNext = document.getElementById('btn-next-batch');
+
+    loading.innerHTML = '正在准备新一批单词…';
+    loading.className = 'review-loading';
+    loading.style.display = 'flex';
+    card.style.display = 'none';
+    actions.style.display = 'none';
+
+    try {
+        const res = await apiFetch('/api/review/next-batch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        const data = await res.json();
+
+        if (data.all_done || data.error) {
+            loading.innerHTML = '<div class="all-done">' +
+                '<div class="all-done-icon">🎉</div>' +
+                '<div class="all-done-title">所有单词都已复习完毕</div>' +
+                '<div class="all-done-sub">今天到此为止，明天再来！<br>或切换到 <strong>自由模式</strong> 继续复习</div>' +
+                '<button class="btn-mode-switch" onclick="switchMode(\'free\')">🆓 切换到自由模式</button>' +
+                '</div>';
+            return;
+        }
+
+        // 拿到新单词，走正常渲染流程
+        currentWordID = data.word_id;
+        currentWord = data.word;
+
+        const wordEl = document.getElementById('review-word-en');
+        wordEl.textContent = currentWord.word;
+        adjustWordFontSize(wordEl);
+
+        buildDetail(currentWord);
+        document.getElementById('review-detail').style.display = 'none';
+        document.getElementById('review-stats').style.display = 'none';
+        document.getElementById('btn-expand').textContent = '🔽 展开详情';
+        expanded = false;
+
+        // 恢复每日模式按钮
+        document.getElementById('actions-daily').querySelector('.btn-forgotten').style.display = '';
+        document.getElementById('actions-daily').querySelector('.btn-remembered').style.display = '';
+        btnNext.style.display = 'none';
+
+        loading.style.display = 'none';
+        card.style.display = 'block';
+    } catch (err) {
+        loading.innerHTML = '<span class="error-msg">❌ 请求失败: ' + esc(err.message) + '</span>';
+        loading.style.display = 'block';
+    }
 }
 
 // ==================== 总览模式 ====================

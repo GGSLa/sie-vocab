@@ -352,6 +352,73 @@ func (r *WordFamilyRepo) GetRandomWordForFreeReview(userID int) (*model.WordEntr
 	return nil, 0, fmt.Errorf("单词 %s 未在词族中找到", pickedWord)
 }
 
+// ---------- 词池生成辅助查询（纯 DB，无业务判断）----------
+
+// GetDueFamilies 随机取 N 个到期的、未在排除列表中的基础词族根
+func (r *WordFamilyRepo) GetDueFamilies(userID int, poolDate string, exclude []string, limit int) ([]string, error) {
+	query := `SELECT COALESCE(base_word, word) AS family_root
+		FROM words
+		WHERE user_id = ? AND type = '基础词'
+		  AND (next_review_date IS NULL OR next_review_date <= ?)`
+	args := []interface{}{userID, poolDate}
+
+	if len(exclude) > 0 {
+		query += ` AND COALESCE(base_word, word) NOT IN (?)`
+		args = append(args, exclude)
+	}
+
+	query += ` GROUP BY family_root ORDER BY RAND() LIMIT ?`
+	args = append(args, limit)
+
+	var families []string
+	err := r.db.Raw(query, args...).Pluck("family_root", &families).Error
+	return families, err
+}
+
+// GetNonDueFamilies 取 N 个未到期的、未在排除列表中的基础词族根，按最早到期日排序
+func (r *WordFamilyRepo) GetNonDueFamilies(userID int, poolDate string, exclude []string, limit int) ([]string, error) {
+	query := `SELECT COALESCE(base_word, word) AS family_root,
+			MIN(next_review_date) AS earliest_due
+		FROM words
+		WHERE user_id = ? AND type = '基础词'
+		  AND next_review_date > ?`
+	args := []interface{}{userID, poolDate}
+
+	if len(exclude) > 0 {
+		query += ` AND COALESCE(base_word, word) NOT IN (?)`
+		args = append(args, exclude)
+	}
+
+	query += ` GROUP BY family_root ORDER BY earliest_due ASC LIMIT ?`
+	args = append(args, limit)
+
+	var families []string
+	err := r.db.Raw(query, args...).Pluck("family_root", &families).Error
+	return families, err
+}
+
+// PickWordFromFamily 从指定词族中选一个单词（到期优先，随机选）
+func (r *WordFamilyRepo) PickWordFromFamily(userID int, familyRoot, poolDate string) (wordID int, word string, err error) {
+	// 优先选到期单词
+	err = r.db.Raw(`
+		SELECT id, word FROM words
+		WHERE user_id = ? AND (word = ? OR base_word = ?)
+		  AND (next_review_date IS NULL OR next_review_date <= ?)
+		ORDER BY RAND() LIMIT 1
+	`, userID, familyRoot, familyRoot, poolDate).Row().Scan(&wordID, &word)
+	if err == nil {
+		return
+	}
+
+	// 无到期词，选最早到期的
+	err = r.db.Raw(`
+		SELECT id, word FROM words
+		WHERE user_id = ? AND (word = ? OR base_word = ?)
+		ORDER BY next_review_date ASC LIMIT 1
+	`, userID, familyRoot, familyRoot).Row().Scan(&wordID, &word)
+	return
+}
+
 // ---------- 总览 ----------
 
 // GetMonthOverview 获取月度总览数据
