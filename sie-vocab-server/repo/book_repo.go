@@ -1,6 +1,8 @@
 package repo
 
 import (
+	"time"
+
 	"gorm.io/gorm"
 
 	"sie-vocab-server/model"
@@ -8,14 +10,16 @@ import (
 
 // Book GORM model for books table
 type Book struct {
-	ID          int    `gorm:"primaryKey;column:id"`
-	UserID      int    `gorm:"column:user_id;index:idx_books_user_id"`
-	Title       string `gorm:"column:title"`
-	Author      string `gorm:"column:author"`
-	Description string `gorm:"column:description"`
-	PDFPath     string `gorm:"column:pdf_path"`
-	OCRLang     string `gorm:"column:ocr_lang"`
-	PageCount   int    `gorm:"column:page_count"`
+	ID          int       `gorm:"primaryKey;column:id"`
+	UserID      int       `gorm:"column:user_id;index:idx_books_user_id"`
+	Title       string    `gorm:"column:title"`
+	Author      string    `gorm:"column:author"`
+	Description string    `gorm:"column:description"`
+	PDFPath     string    `gorm:"column:pdf_path"`
+	OCRLang     string    `gorm:"column:ocr_lang"`
+	PageCount   int       `gorm:"column:page_count"`
+	CreatedAt   time.Time `gorm:"column:created_at"`
+	UpdatedAt   time.Time `gorm:"column:updated_at"`
 }
 
 // TableName overrides the default table name
@@ -94,5 +98,7 @@ func bookRowToModel(row Book) model.Book {
 		PDFPath:     row.PDFPath,
 		OCRLang:     row.OCRLang,
 		PageCount:   row.PageCount,
+		CreatedAt:   row.CreatedAt,
+		UpdatedAt:   row.UpdatedAt,
 	}
 }
