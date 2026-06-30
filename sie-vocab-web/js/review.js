@@ -175,7 +175,7 @@ function buildDetail(w) {
         w.examples.forEach((ex, i) => {
             html += '<tr>';
             html += '<td>' + (i + 1) + '.</td>';
-            html += '<td>' + esc(ex.en) + '</td>';
+            html += '<td><span class="example-en">' + esc(ex.en) + '</span> <span class="btn-speak-inline" onclick="event.stopPropagation(); speakExample(this)" title="朗读例句">🔊</span></td>';
             html += '<td>' + esc(ex.zh) + '</td>';
             html += '</tr>';
         });
@@ -223,18 +223,28 @@ function formatReviewDate(raw) {
 function speakWord() {
     if (!currentWord || !currentWord.word) return;
     const btn = document.getElementById('btn-speak');
-    // Cancel any ongoing speech
     window.speechSynthesis.cancel();
 
-    const utterance = new SpeechSynthesisUtterance(currentWord.word);
-    utterance.lang = 'en-US';
-    utterance.rate = 0.85;  // slightly slower for clarity
+    const u = createUtterance(currentWord.word);
 
     btn.classList.add('speaking');
-    utterance.onend = () => btn.classList.remove('speaking');
-    utterance.onerror = () => btn.classList.remove('speaking');
+    u.onend = () => btn.classList.remove('speaking');
+    u.onerror = () => btn.classList.remove('speaking');
 
-    window.speechSynthesis.speak(utterance);
+    window.speechSynthesis.speak(u);
+}
+
+function speakExample(el) {
+    const enSpan = el.parentElement.querySelector('.example-en');
+    if (!enSpan) return;
+    const text = enSpan.textContent.trim();
+    if (!text) return;
+    window.speechSynthesis.cancel();
+    const u = createUtterance(text);
+    el.classList.add('speaking');
+    u.onend = () => el.classList.remove('speaking');
+    u.onerror = () => el.classList.remove('speaking');
+    window.speechSynthesis.speak(u);
 }
 
 // ==================== 长词字号自适应 ====================

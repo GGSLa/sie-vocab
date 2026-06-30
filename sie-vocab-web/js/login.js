@@ -85,7 +85,7 @@ async function handleAuth(event) {
 
         if (data.token) {
             setToken(data.token);
-            window.location.href = '/';
+            window.location.href = BASE_PATH + '/';
         }
     } catch (err) {
         showError('网络错误，请检查连接后重试');

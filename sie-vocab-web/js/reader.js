@@ -493,7 +493,7 @@ function loadPageImage(page) {
     container.innerHTML =
         '<div class="reader-page-img-wrap">' +
         '<div class="reader-page-img-label">第 ' + page + ' 页</div>' +
-        '<img src="/api/reader/page-image?book=' + currentBookId + '&page=' + page + '&token=' + encodeURIComponent(getToken()) + '&t=' + Date.now() + '" ' +
+        '<img src="' + BASE_PATH + '/api/reader/page-image?book=' + currentBookId + '&page=' + page + '&token=' + encodeURIComponent(getToken()) + '&t=' + Date.now() + '" ' +
         'alt="PDF Page ' + page + '" onerror="this.parentElement.innerHTML=\'<div class=reader-image-placeholder>图片加载失败</div>\'">' +
         '</div>';
 }
@@ -792,7 +792,7 @@ function renderLookupCardContent(words, mode) {
         html += '<div class="word-card" style="margin-bottom:16px">';
         html += '<div class="word-header">';
         html += '<span class="word-name">' + esc(w.word) + '</span>' +
-            '<span class="btn-speak-inline" onclick="event.stopPropagation(); speakWordInline(this)" title="朗读发音">🔊</span>';
+            '<span class="btn-speak-inline" onclick="event.stopPropagation(); speakWordInline(this)" title="朗读发音（随机音色）">🔊</span>';
         html += '<span class="badge ' + (w.type === '基础词' ? 'badge-base' : 'badge-derived') + '">' + esc(w.type) + '</span>';
         html += '<span class="pos-tag">' + esc(w.pos || '') + '</span>';
         html += '</div>';
@@ -991,9 +991,7 @@ function speakWordInline(el) {
     const word = nameEl.textContent.trim();
     if (!word) return;
     window.speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(word);
-    u.lang = 'en-US';
-    u.rate = 0.85;
+    const u = createUtterance(word);
     el.classList.add('speaking');
     u.onend = () => el.classList.remove('speaking');
     u.onerror = () => el.classList.remove('speaking');
@@ -1210,4 +1208,3 @@ function showEmpty(msg) {
     el.style.display = 'block';
 }
 function hideEmpty() { document.getElementById('reader-empty').style.display = 'none'; }
-
