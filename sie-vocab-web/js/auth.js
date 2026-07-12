@@ -50,57 +50,82 @@ function requireAuth() {
     }
 }
 
-// ── TTS 语音管理 ──
+// ── TTS 本地朗读（带语音轮换） ──
+// 策略：尝试设 voice 轮换，失败的语音自动加入黑名单持久化到 localStorage
+// Edge 能正常轮换，Chrome（中文 Win）会自动发现所有语音都坏 → 回退默认
 
-// 精选高质量英文语音白名单（按名称部分匹配）
-// 各平台预设，排除 iOS 上的新奇搞怪语音（Albert/Bells/Boing/Whisper 等）
 const GOOD_VOICES = [
-    // ── Windows ──
-    'Microsoft David',   // 男声
-    'Microsoft Zira',    // 女声
-    'Microsoft Mark',    // 男声
-
-    // ── macOS / iOS ──
-    'Samantha',          // 美式女声（默认推荐）
-    'Alex',              // 美式男声
-    'Daniel',            // 英式男声
-    'Karen',             // 澳式女声
-    'Moira',             // 爱尔兰女声
-    'Fiona',             // 苏格兰女声
-    'Veena',             // 印度女声
-    'Tom',               // 美式男声
-    'Susan',             // 美式女声
-
-    // ── Google / Android ──
-    'Google US English',
-    'Google UK English Female',
-    'Google UK English Male',
+    'Microsoft David', 'Microsoft Zira', 'Microsoft Mark',
+    'Samantha', 'Alex', 'Daniel', 'Karen', 'Moira', 'Fiona', 'Veena', 'Tom', 'Susan',
+    'Google US English', 'Google UK English Female', 'Google UK English Male',
 ];
 
-// 获取白名单中的英文语音
-function getGoodEnglishVoices() {
-    const all = window.speechSynthesis.getVoices().filter(v => v.lang.startsWith('en'));
-    const good = all.filter(v => GOOD_VOICES.some(name => v.name.includes(name)));
-    // 如果白名单一个都没命中（罕见），回退到全部英文语音
-    return good.length > 0 ? good : all;
+// 持久化黑名单（存到 localStorage）
+function _getBrokenVoices() {
+    try { return new Set(JSON.parse(localStorage.getItem('sie_broken_voices') || '[]')); }
+    catch { return new Set(); }
+}
+function _saveBrokenVoices(set) {
+    localStorage.setItem('sie_broken_voices', JSON.stringify([...set]));
 }
 
-// 轮换选语音（基于 localStorage 持久化当前位置，每次调用自动推进）
-function pickNextVoice() {
-    const voices = getGoodEnglishVoices();
+// 获取可用英文语音列表（每次取新鲜 voice 对象）
+function _getWorkingVoices() {
+    const broken = _getBrokenVoices();
+    const all = speechSynthesis.getVoices().filter(v => v.lang && v.lang.startsWith('en') && !broken.has(v.name));
+    const good = all.filter(v => GOOD_VOICES.some(name => v.name.includes(name)));
+    const source = good.length > 0 ? good : all;
+    return source;
+}
+
+// 轮换选语音
+function _pickVoice() {
+    const voices = _getWorkingVoices();
     if (voices.length === 0) return null;
     const cur = parseInt(localStorage.getItem('sie_tts_voice_idx') || '0');
     const next = (cur + 1) % voices.length;
     localStorage.setItem('sie_tts_voice_idx', next);
-    return voices[cur];  // 返回当前位置的语音，然后推进到下一个
+    return voices[cur];
 }
 
-// 创建带语音的 Utterance（公共工厂函数，每次自动轮换音色）
+// 标记语音为坏
+function _markBroken(name) {
+    const broken = _getBrokenVoices();
+    broken.add(name);
+    _saveBrokenVoices(broken);
+    // 重置轮换索引，下次从新列表开始
+    localStorage.setItem('sie_tts_voice_idx', '0');
+}
+
 function createUtterance(text) {
     const u = new SpeechSynthesisUtterance(text);
-    u.lang = 'en-US';
     u.rate = 0.85;
-    const voice = pickNextVoice();
-    if (voice) u.voice = voice;
     return u;
+}
+
+function safeSpeak(textOrUtterance) {
+    const u = typeof textOrUtterance === 'string' ? createUtterance(textOrUtterance) : textOrUtterance;
+
+    // 尝试轮换语音
+    const voice = _pickVoice();
+    if (voice) u.voice = voice;
+    // 不设 lang — Chrome 中文 Win 上设了反而无声
+
+    window._ttsCurrentUtterance = u;
+
+    const prevOnEnd = u.onend;
+    const prevOnError = u.onerror;
+    u.onend = () => {
+        window._ttsCurrentUtterance = null;
+        if (prevOnEnd) prevOnEnd();
+    };
+    u.onerror = () => {
+        // 语音坏了！加入黑名单，让下次用别的
+        if (u.voice) _markBroken(u.voice.name);
+        window._ttsCurrentUtterance = null;
+        if (prevOnError) prevOnError();
+    };
+
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(u);
 }

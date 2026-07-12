@@ -4,10 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>单词复习</title>
+    <link rel="icon" type="image/png" href="/book.png">
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
-    <link rel="stylesheet" href="/css/style.css?v=42">
+    <link rel="stylesheet" href="/css/style.css?v=43">
 </head>
 <body>
 <div class="wrapper-review">
@@ -40,6 +41,7 @@
         <div id="review-card" class="review-card" style="display:none;">
             <button id="btn-speak" class="btn-speak" onclick="speakWord()" title="朗读发音">🔊</button>
             <div class="review-word-en" id="review-word-en"></div>
+            <div id="batch-progress" class="batch-progress" style="display:none;"></div>
             <button id="btn-expand" class="btn-expand" onclick="toggleExpand()">🔽 展开详情</button>
             <div id="review-stats" class="review-stats" style="display:none;"></div>
             <div id="review-detail" class="review-detail" style="display:none;"></div>
@@ -93,7 +95,7 @@
     </div>
 </div>
 
-<script src="/js/auth.js?v=3"></script>
-<script src="/js/review.js?v=23"></script>
+<script src="/js/auth.js?v=5"></script>
+<script src="/js/review.js?v=26"></script>
 </body>
 </html>

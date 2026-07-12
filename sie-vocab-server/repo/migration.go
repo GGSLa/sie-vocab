@@ -171,6 +171,26 @@ func AutoMigrate(db *gorm.DB) error {
 	}
 	log.Println("✅ daily_word_pool 表就绪")
 
+	// ── 5. 创建 global_word_cache 表（全局单词缓存，无 user_id，跨用户共享）──
+	if err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS global_word_cache (
+			id BIGINT AUTO_INCREMENT PRIMARY KEY,
+			word VARCHAR(100) NOT NULL,
+			base_word VARCHAR(100),
+			type VARCHAR(20) NOT NULL DEFAULT '基础词',
+			pos VARCHAR(50),
+			derivation VARCHAR(200),
+			meanings_json JSON,
+			examples_json JSON,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+			UNIQUE INDEX idx_global_word_cache_word (word)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+	`).Error; err != nil {
+		return fmt.Errorf("创建 global_word_cache 表失败: %v", err)
+	}
+	log.Println("✅ global_word_cache 表就绪")
+
 	log.Println("✅ 数据库迁移完成")
 	return nil
 }

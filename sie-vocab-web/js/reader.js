@@ -605,11 +605,17 @@ async function lookupWord(el) {
         const qData = await qRes.json();
 
         if (qData.found && qData.data && qData.data.words && qData.data.words.length > 0) {
-            // Already in database — show cached view
-            lookupMode = 'cached';
             lookupDBWords = qData.data.words;
             lookupAIWords = null;
-            panelBody.innerHTML = renderLookupCardCached(qData.data.words);
+            if (qData.source === 'global') {
+                // 全局缓存 — 和AI翻译展示一致，用户无感知
+                lookupMode = 'new';
+                panelBody.innerHTML = renderLookupCardNew(qData.data.words);
+            } else {
+                // 个人数据库 — 已保存
+                lookupMode = 'cached';
+                panelBody.innerHTML = renderLookupCardCached(qData.data.words);
+            }
         } else {
             // Not in database — call AI
             lookupMode = 'new';
@@ -841,8 +847,8 @@ async function saveVocabWord(index, btnEl) {
             body: JSON.stringify({word: v.word})
         });
         const qData = await qRes.json();
-        if (qData.found && qData.data && qData.data.words && qData.data.words.length > 0) {
-            // Already exists — show diff modal so user can compare before overwriting
+        if (qData.found && qData.source === 'personal' && qData.data && qData.data.words && qData.data.words.length > 0) {
+            // Already exists in personal DB — show diff modal so user can compare before overwriting
             btnEl.textContent = '对比中';
             lookupVocabBtnEl = btnEl;  // remember original button for later update
 
@@ -926,7 +932,7 @@ async function saveLookupWord(index, btnEl) {
             body: JSON.stringify({word: w.word})
         });
         const qData = await qRes.json();
-        if (qData.found) {
+        if (qData.found && qData.source === 'personal') {
             btnEl.textContent = '已存在';
             btnEl.className = 'btn-save saved';
             return;
@@ -990,12 +996,11 @@ function speakWordInline(el) {
     if (!nameEl) return;
     const word = nameEl.textContent.trim();
     if (!word) return;
-    window.speechSynthesis.cancel();
     const u = createUtterance(word);
     el.classList.add('speaking');
     u.onend = () => el.classList.remove('speaking');
     u.onerror = () => el.classList.remove('speaking');
-    window.speechSynthesis.speak(u);
+    safeSpeak(u);
 }
 
 // ============ Sentence Breakdown (selection → floating button → API → left panel) ============

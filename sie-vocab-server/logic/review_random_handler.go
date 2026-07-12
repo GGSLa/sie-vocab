@@ -51,7 +51,9 @@ func (h *ReviewRandomHandler) GetRandom(userID int) (*model.ReviewRandomResponse
 			// 真正无词可用
 			return nil, true, fmt.Errorf("所有单词均已复习")
 		}
-		return &model.ReviewRandomResponse{BatchDone: true, CanMore: true}, false, nil
+		drawn, _ := h.poolRepo.CountDrawn(userID, poolDate, batch)
+		total, _ := h.poolRepo.CountBatchTotal(userID, poolDate, batch)
+		return &model.ReviewRandomResponse{BatchDone: true, CanMore: true, BatchDrawn: drawn, BatchTotal: total}, false, nil
 	}
 
 	// 3. 获取完整词族数据
@@ -60,11 +62,17 @@ func (h *ReviewRandomHandler) GetRandom(userID int) (*model.ReviewRandomResponse
 		return nil, false, err
 	}
 
+	// 4. 批次进度
+	drawn, _ := h.poolRepo.CountDrawn(userID, poolDate, batch)
+	total, _ := h.poolRepo.CountBatchTotal(userID, poolDate, batch)
+
 	for _, entry := range family {
 		if entry.Word == word {
 			return &model.ReviewRandomResponse{
-				WordID: wordID,
-				Word:   entry,
+				WordID:     wordID,
+				Word:       entry,
+				BatchDrawn: drawn,
+				BatchTotal: total,
 			}, false, nil
 		}
 	}

@@ -50,11 +50,17 @@ func (h *ReviewNextBatchHandler) NextBatch(userID int) (*model.ReviewRandomRespo
 		return nil, err
 	}
 
+	// 新批次进度（刚生成，已抽取 0）
+	drawn, _ := h.randomHandler.poolRepo.CountDrawn(userID, poolDate, newBatch)
+	total, _ := h.randomHandler.poolRepo.CountBatchTotal(userID, poolDate, newBatch)
+
 	for _, entry := range family {
 		if entry.Word == word {
 			return &model.ReviewRandomResponse{
-				WordID: wordID,
-				Word:   entry,
+				WordID:     wordID,
+				Word:       entry,
+				BatchDrawn: drawn,
+				BatchTotal: total,
 			}, nil
 		}
 	}

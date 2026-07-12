@@ -35,14 +35,17 @@ func (h *ReviewRecordHandler) Record(wordID int, userID int) (*model.ReviewRecor
 		nextDate = nd
 	}
 
-	// 4. 当前批次剩余
+	// 4. 批次进度
 	batch, _ := h.poolRepo.GetActiveBatch(userID, poolDate)
 	remaining, _ := h.poolRepo.CountRemaining(userID, poolDate, batch)
+	total, _ := h.poolRepo.CountBatchTotal(userID, poolDate, batch)
 
 	return &model.ReviewRecordResult{
 		WordCount:      wCount,
 		BaseCount:      bCount,
 		NextDate:       nextDate,
+		BatchDrawn:     total - remaining,
+		BatchTotal:     total,
 		BatchRemaining: remaining,
 	}, nil
 }

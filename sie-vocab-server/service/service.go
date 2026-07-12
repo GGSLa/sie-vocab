@@ -160,8 +160,10 @@ func HandleReviewRandom(h *logic.ReviewRandomHandler) http.HandlerFunc {
 		// 批次完成（非错误，是正常状态）
 		if resp.BatchDone {
 			writeJSON(w, http.StatusOK, map[string]interface{}{
-				"batch_done": true,
-				"can_more":   resp.CanMore,
+				"batch_done":  true,
+				"can_more":    resp.CanMore,
+				"batch_drawn": resp.BatchDrawn,
+				"batch_total": resp.BatchTotal,
 			})
 			return
 		}
@@ -189,13 +191,16 @@ func HandleReviewRecord(h *logic.ReviewRecordHandler) http.HandlerFunc {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "记录复习失败"})
 			return
 		}
-		log.Printf("📝 已记录复习: word_id=%d (词:%d 族:%d 下次:%s 批次剩余:%d)",
-			req.WordID, result.WordCount, result.BaseCount, result.NextDate, result.BatchRemaining)
+		log.Printf("📝 已记录复习: word_id=%d (词:%d 族:%d 下次:%s 批次:%d/%d 剩余:%d)",
+			req.WordID, result.WordCount, result.BaseCount, result.NextDate,
+			result.BatchDrawn, result.BatchTotal, result.BatchRemaining)
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"success":          true,
 			"word_count":       result.WordCount,
 			"base_count":       result.BaseCount,
 			"next_review_date": result.NextDate,
+			"batch_drawn":      result.BatchDrawn,
+			"batch_total":      result.BatchTotal,
 			"batch_remaining":  result.BatchRemaining,
 		})
 	}

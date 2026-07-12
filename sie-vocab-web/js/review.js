@@ -5,6 +5,8 @@ let currentWord = null;
 let expanded = false;
 let overviewYear = 0;        // 0 = current year
 let overviewMonth = 0;       // 0 = current month
+let batchTotal = 0;          // 当前批次总词数
+let batchDrawn = 0;          // 当前批次已抽取数
 
 // 页面加载时检查认证并自动抽词
 window.addEventListener('DOMContentLoaded', () => {
@@ -15,6 +17,20 @@ window.addEventListener('DOMContentLoaded', () => {
 function esc(s) {
     if (!s) return '';
     return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ==================== 批次进度 ====================
+
+function updateBatchProgress(total, drawn) {
+    batchTotal = total || 0;
+    batchDrawn = drawn || 0;
+    const el = document.getElementById('batch-progress');
+    if (batchTotal > 0 && currentMode === 'daily') {
+        el.textContent = '📋 ' + batchDrawn + ' / ' + batchTotal;
+        el.style.display = 'inline-block';
+    } else {
+        el.style.display = 'none';
+    }
 }
 
 // ==================== 模式切换 ====================
@@ -37,9 +53,14 @@ function switchMode(mode) {
         actions.style.display = 'none';
         loading.style.display = 'none';
         overview.style.display = 'block';
+        document.getElementById('batch-progress').style.display = 'none';
         fetchOverviewData();
     } else {
         overview.style.display = 'none';
+        // 切换模式时重置进度（新请求会更新）
+        batchTotal = 0;
+        batchDrawn = 0;
+        document.getElementById('batch-progress').style.display = 'none';
         fetchRandomWord();
     }
 }
@@ -65,6 +86,7 @@ async function fetchRandomWord() {
         loading.innerHTML = '正在抽取单词…';
         loading.className = 'review-loading';
         loading.style.display = 'flex';
+        document.getElementById('batch-progress').style.display = 'none';
     }, 300);
 
     try {
@@ -81,10 +103,15 @@ async function fetchRandomWord() {
             loading.style.display = 'none';
             card.style.display = 'none';
             actions.style.display = 'none';
+            // 更新进度（批次完成时全部已抽取）
+            if (data.batch_total) {
+                updateBatchProgress(data.batch_total, data.batch_drawn);
+                document.getElementById('batch-progress').style.display = 'inline-block';
+            }
             loading.style.display = 'flex';
             loading.innerHTML = '<div class="all-done">' +
                 '<div class="all-done-icon">🎉</div>' +
-                '<div class="all-done-title">本批 30 词已完成</div>' +
+                '<div class="all-done-title">本批 ' + (data.batch_total || 30) + ' 词已完成</div>' +
                 '<div class="all-done-sub">' + (data.can_more ? '还有单词可以复习，要来一批吗？' : '所有单词都已复习完毕，明天再来！') + '</div>' +
                 (data.can_more ? '<button class="btn-mode-switch" onclick="requestNextBatch()">📦 再来一批</button>' : '') +
                 '</div>';
@@ -93,6 +120,7 @@ async function fetchRandomWord() {
 
         if (data.error) {
             loading.style.display = 'none';
+            document.getElementById('batch-progress').style.display = 'none';
             if (data.all_done && currentMode === 'daily') {
                 loading.style.display = 'flex';
                 loading.innerHTML = '<div class="all-done">' +
@@ -110,6 +138,11 @@ async function fetchRandomWord() {
 
         currentWordID = data.word_id;
         currentWord = data.word;
+
+        // 更新批次进度
+        if (data.batch_total) {
+            updateBatchProgress(data.batch_total, data.batch_drawn);
+        }
 
         // 显示英文单词
         const wordEl = document.getElementById('review-word-en');
@@ -223,7 +256,10 @@ async function recordReview() {
         return {
             word_count: data.word_count || 0,
             base_count: data.base_count || 0,
-            next_review_date: data.next_review_date || ''
+            next_review_date: data.next_review_date || '',
+            batch_drawn: data.batch_drawn,
+            batch_total: data.batch_total,
+            batch_remaining: data.batch_remaining
         };
     } catch (err) {
         return null;
@@ -244,15 +280,11 @@ function formatReviewDate(raw) {
 function speakWord() {
     if (!currentWord || !currentWord.word) return;
     const btn = document.getElementById('btn-speak');
-    window.speechSynthesis.cancel();
-
     const u = createUtterance(currentWord.word);
-
     btn.classList.add('speaking');
     u.onend = () => btn.classList.remove('speaking');
     u.onerror = () => btn.classList.remove('speaking');
-
-    window.speechSynthesis.speak(u);
+    safeSpeak(u);
 }
 
 function speakExample(el) {
@@ -260,12 +292,11 @@ function speakExample(el) {
     if (!enSpan) return;
     const text = enSpan.textContent.trim();
     if (!text) return;
-    window.speechSynthesis.cancel();
     const u = createUtterance(text);
     el.classList.add('speaking');
     u.onend = () => el.classList.remove('speaking');
     u.onerror = () => el.classList.remove('speaking');
-    window.speechSynthesis.speak(u);
+    safeSpeak(u);
 }
 
 // ==================== 长词字号自适应 ====================
@@ -311,6 +342,11 @@ async function markRemembered() {
     if (currentWordID) {
         const result = await recordReview();
         if (result) {
+            // 更新批次进度
+            if (result.batch_total) {
+                updateBatchProgress(result.batch_total, result.batch_drawn);
+            }
+
             // 短暂显示统计信息
             const stats = document.getElementById('review-stats');
             let statsHTML = '📊 本词复习：<strong>' + result.word_count + '</strong> 次';
@@ -337,7 +373,7 @@ async function markRemembered() {
 }
 
 function markForgotten() {
-    // 不记录，直接跳转下一个
+    // 不记录，不标记已抽取（保留在池中可再次出现），直接跳转下一个
     fetchRandomWord();
 }
 
@@ -367,6 +403,7 @@ async function requestNextBatch() {
         const data = await res.json();
 
         if (data.all_done || data.error) {
+            document.getElementById('batch-progress').style.display = 'none';
             loading.innerHTML = '<div class="all-done">' +
                 '<div class="all-done-icon">🎉</div>' +
                 '<div class="all-done-title">所有单词都已复习完毕</div>' +
@@ -379,6 +416,11 @@ async function requestNextBatch() {
         // 拿到新单词，走正常渲染流程
         currentWordID = data.word_id;
         currentWord = data.word;
+
+        // 更新批次进度（新批次从 0 开始）
+        if (data.batch_total) {
+            updateBatchProgress(data.batch_total, data.batch_drawn);
+        }
 
         const wordEl = document.getElementById('review-word-en');
         wordEl.textContent = currentWord.word;

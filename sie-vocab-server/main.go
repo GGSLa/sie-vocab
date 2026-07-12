@@ -17,6 +17,7 @@ import (
 	"sie-vocab-server/logic"
 	"sie-vocab-server/model"
 	"sie-vocab-server/repo"
+	"sie-vocab-server/repo/gen/query"
 	"sie-vocab-server/service"
 )
 
@@ -37,6 +38,9 @@ func main() {
 	defer sqlDB.Close()
 	log.Println("✅ 数据库连接成功")
 
+	// 初始化 GORM Gen 生成的查询（全局默认实例）
+	query.SetDefault(db)
+
 	// 初始化 AI 限流器
 	client.InitRateLimiter(cfg.DeepSeekRPM, cfg.DeepSeekMaxConcurrent)
 	log.Printf("⏱️ AI 限流: %d RPM / %d 并发", cfg.DeepSeekRPM, cfg.DeepSeekMaxConcurrent)
@@ -55,12 +59,13 @@ func main() {
 	userRepo := repo.NewUserRepo(db)
 	invitationRepo := repo.NewInvitationRepo(db)
 	poolRepo := repo.NewDailyPoolRepo(db)
+	globalCacheRepo := repo.NewGlobalWordCacheRepo(db)
 
 	// ── Logic 层 ──
-	chatHandler := logic.NewChatHandler(cfg.DeepSeekAPIKey)
-	wordQueryHandler := logic.NewWordQueryHandler(familyRepo)
-	wordSaveHandler := logic.NewWordSaveHandler(familyRepo)
-	wordSaveAllHandler := logic.NewWordSaveAllHandler(familyRepo)
+	chatHandler := logic.NewChatHandler(cfg.DeepSeekAPIKey, globalCacheRepo)
+	wordQueryHandler := logic.NewWordQueryHandler(familyRepo, globalCacheRepo)
+	wordSaveHandler := logic.NewWordSaveHandler(familyRepo, globalCacheRepo)
+	wordSaveAllHandler := logic.NewWordSaveAllHandler(familyRepo, globalCacheRepo)
 	reviewRandomHandler := logic.NewReviewRandomHandler(familyRepo, poolRepo, reviewLogRepo)
 	reviewRecordHandler := logic.NewReviewRecordHandler(familyRepo, poolRepo)
 	reviewNextBatchHandler := logic.NewReviewNextBatchHandler(reviewRandomHandler)

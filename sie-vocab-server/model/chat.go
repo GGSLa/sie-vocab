@@ -18,8 +18,9 @@ type QueryRequest struct {
 
 // QueryResponse 查词响应
 type QueryResponse struct {
-	Found bool           `json:"found"`
-	Data  *WordsResponse `json:"data,omitempty"`
+	Found  bool           `json:"found"`
+	Source string         `json:"source,omitempty"` // "personal" 或 "global"
+	Data   *WordsResponse `json:"data,omitempty"`
 }
 
 // SaveAllRequest 批量保存请求

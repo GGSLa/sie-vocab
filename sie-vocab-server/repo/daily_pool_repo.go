@@ -71,6 +71,28 @@ func (r *DailyPoolRepo) CountRemaining(userID int, poolDate string, batchNum int
 	return int(count), err
 }
 
+// CountBatchTotal 当前批次总词数
+func (r *DailyPoolRepo) CountBatchTotal(userID int, poolDate string, batchNum int) (int, error) {
+	var count int64
+	err := r.db.Raw(
+		`SELECT COUNT(*) FROM daily_word_pool
+		 WHERE user_id = ? AND pool_date = ? AND batch_num = ?`,
+		userID, poolDate, batchNum,
+	).Row().Scan(&count)
+	return int(count), err
+}
+
+// CountDrawn 当前批次已抽取数
+func (r *DailyPoolRepo) CountDrawn(userID int, poolDate string, batchNum int) (int, error) {
+	var count int64
+	err := r.db.Raw(
+		`SELECT COUNT(*) FROM daily_word_pool
+		 WHERE user_id = ? AND pool_date = ? AND batch_num = ? AND drawn = 1`,
+		userID, poolDate, batchNum,
+	).Row().Scan(&count)
+	return int(count), err
+}
+
 // GetActiveBatch 获取当前活跃批次号（最大 batch_num），无则返回 0
 func (r *DailyPoolRepo) GetActiveBatch(userID int, poolDate string) (int, error) {
 	var batch int

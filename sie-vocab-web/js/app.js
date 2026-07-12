@@ -39,11 +39,19 @@ async function send() {
         const qData = await qRes.json();
 
         if (qData.found && qData.data && qData.data.words && qData.data.words.length > 0) {
-            // 数据库已有
-            oldWords = qData.data.words;
-            currentWords = qData.data.words;
-            currentMode = 'cached';
-            renderCachedView(qData.data.words);
+            if (qData.source === 'global') {
+                // 全局缓存 — 展示效果和AI翻译一致，用户无需感知全局缓存
+                oldWords = qData.data.words;
+                currentWords = qData.data.words;
+                currentMode = 'new';
+                renderWords(qData.data.words, 'new');
+            } else {
+                // 来自个人数据库 — 已有保存
+                oldWords = qData.data.words;
+                currentWords = qData.data.words;
+                currentMode = 'cached';
+                renderCachedView(qData.data.words);
+            }
         } else {
             // 数据库没有，调 AI
             await fetchAIAndRender();
