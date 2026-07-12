@@ -71,6 +71,7 @@ type textElement struct {
 	height int
 	font   int
 	bold   bool
+	family string // font family from <fontspec> (e.g. "Merriweather", "OpenSans")
 	text   string
 }
 
@@ -79,6 +80,7 @@ type textLine struct {
 	elements []textElement
 	maxFont  int
 	bold     bool
+	family   string // dominant font family for this line
 }
 
 // ExtractPageTextStructured extracts text from a single page, detecting headings
@@ -134,6 +136,7 @@ func ExtractPageTextStructured(pdfPath string, page int) (string, error) {
 func parsePageXML(data []byte) (map[int]int, []textElement, error) {
 	decoder := xml.NewDecoder(bytes.NewReader(data))
 	fontSizes := make(map[int]int)
+	fontFamilies := make(map[int]string)
 	var elements []textElement
 
 	for {
@@ -146,6 +149,7 @@ func parsePageXML(data []byte) (map[int]int, []textElement, error) {
 			switch t.Name.Local {
 			case "fontspec":
 				var id, size int
+				var family string
 				for _, a := range t.Attr {
 					if a.Name.Local == "id" {
 						fmt.Sscanf(a.Value, "%d", &id)
@@ -153,8 +157,12 @@ func parsePageXML(data []byte) (map[int]int, []textElement, error) {
 					if a.Name.Local == "size" {
 						fmt.Sscanf(a.Value, "%d", &size)
 					}
+					if a.Name.Local == "family" {
+						family = normalizeFamily(a.Value)
+					}
 				}
 				fontSizes[id] = size
+				fontFamilies[id] = family
 
 			case "text":
 				var el textElement
@@ -174,6 +182,7 @@ func parsePageXML(data []byte) (map[int]int, []textElement, error) {
 				}
 				// Read inner content (may include <b>, <i>, <br> and char data)
 				el.text, el.bold = readTextContent(decoder)
+				el.family = fontFamilies[el.font]
 				if el.text != "" {
 					elements = append(elements, el)
 				}
@@ -248,7 +257,28 @@ func groupIntoLines(elements []textElement, fontSizes map[int]int) []textLine {
 				hasBold = true
 			}
 		}
-		lines = append(lines, textLine{top: y, elements: els, maxFont: maxFont, bold: hasBold})
+		// Determine dominant font family for the line
+		family := ""
+		familyCount := make(map[string]int)
+		for _, el := range els {
+			if el.family != "" {
+				familyCount[el.family]++
+			}
+		}
+		maxCount := 0
+		for fam, count := range familyCount {
+			if count > maxCount {
+				maxCount = count
+				family = fam
+			}
+		}
+		lines = append(lines, textLine{
+			top:      y,
+			elements: els,
+			maxFont:  maxFont,
+			bold:     hasBold,
+			family:   family,
+		})
 	}
 	return lines
 }
@@ -315,6 +345,7 @@ type mergedLine struct {
 	top     int
 	text    string
 	prefix  string // heading prefix: "# ", "## ", "### ", or ""
+	family  string // font family for callout/body detection
 }
 
 // buildStructuredText constructs the output text with heading markers.
@@ -370,7 +401,7 @@ func buildStructuredText(lines []textLine, bodySize int) string {
 		}
 
 		prefix := classifyLine(line, text, bodySize)
-		raw = append(raw, mergedLine{top: line.top, text: text, prefix: prefix})
+		raw = append(raw, mergedLine{top: line.top, text: text, prefix: prefix, family: line.family})
 	}
 
 	// Phase 2: merge consecutive same-level headings and drop caps
@@ -380,10 +411,16 @@ func buildStructuredText(lines []textLine, bodySize int) string {
 	var out strings.Builder
 	prevWasHeading := false
 	lastTop := -1000
+	lastFamily := "" // track font family for callout/body separation
 
 	for _, ml := range merged {
 		vertGap := ml.top - lastTop
 		lastTop = ml.top
+
+		// Detect font family switch between non-heading lines
+		familySwitch := !prevWasHeading &&
+			lastFamily != "" && ml.family != "" &&
+			lastFamily != ml.family
 
 		if ml.prefix != "" {
 			if prevWasHeading {
@@ -396,7 +433,9 @@ func buildStructuredText(lines []textLine, bodySize int) string {
 			out.WriteByte('\n')
 			prevWasHeading = true
 		} else {
-			if prevWasHeading && vertGap > 15 {
+			if familySwitch && out.Len() > 0 {
+				out.WriteString("\n\n")
+			} else if prevWasHeading && vertGap > 15 {
 				out.WriteByte('\n')
 			} else if !prevWasHeading && vertGap > 20 && out.Len() > 0 {
 				out.WriteString("\n\n")
@@ -405,6 +444,11 @@ func buildStructuredText(lines []textLine, bodySize int) string {
 			}
 			out.WriteString(ml.text)
 			prevWasHeading = false
+		}
+
+		// Track font family for switch detection
+		if ml.family != "" {
+			lastFamily = ml.family
 		}
 	}
 
@@ -438,7 +482,8 @@ func mergeRelatedLines(raw []mergedLine) []mergedLine {
 			next := raw[i+1]
 			// Prepend the drop cap to the next line
 			next.text = ml.text + next.text
-			next.top = ml.top // use drop cap's position
+			// Keep next.top (body text position) rather than ml.top (drop cap position)
+				// to avoid false paragraph breaks caused by the drop cap's vertical offset.
 			out = append(out, next)
 			i++ // skip the next line since we merged it
 			continue
@@ -541,6 +586,17 @@ func abs(x int) int {
 // isLetter returns true if r is an ASCII letter.
 func isLetter(r rune) bool {
 	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z')
+}
+
+// normalizeFamily strips the PDF subset prefix from a font family name.
+// pdftohtml outputs names like "EMBDHV+Merriweather" or "JJLHZL+OpenSans"
+// where the prefix is a random hash used for font subsetting.
+// We strip the prefix to get the canonical family name for comparison.
+func normalizeFamily(family string) string {
+	if idx := strings.LastIndex(family, "+"); idx >= 0 {
+		return family[idx+1:]
+	}
+	return family
 }
 
 // ---------- OCR fallback for scanned/image-based PDF pages ----------
@@ -807,81 +863,7 @@ func mergeHardWrappedLines(text string) string {
 	// lowercase letter or a common continuation word, merge them.
 	result = mergeFalseParagraphBreaks(result)
 
-	// Third pass: split body text that was merged into callout lines
-	// e.g. "»...securities being offered The preceding information..." → callout + "\n\n" + body
-	result = splitBodyFromCalloutLines(result)
-
 	return strings.TrimSpace(result)
-}
-
-// splitBodyFromCalloutLines detects when body text has been merged into a
-// callout line (no blank-line separator in the original PDF text extraction).
-// It looks for two patterns within callout lines:
-//   1. "...word. CapitalWord..." — sentence-ending period + capital
-//   2. "...word CapitalWord..." — no period but body text starts mid-line
-// and splits them, inserting a blank-line paragraph break.
-func splitBodyFromCalloutLines(text string) string {
-	lines := strings.Split(text, "\n")
-	var out []string
-
-	for _, line := range lines {
-		if !strings.HasPrefix(strings.TrimSpace(line), "»") {
-			out = append(out, line)
-			continue
-		}
-
-		trimmed := strings.TrimSpace(line)
-		runes := []rune(trimmed)
-		splitIdx := -1
-
-		// Pattern 1: ". <Capital>" — sentence-ending period followed by capital
-		for j := 0; j < len(runes)-3; j++ {
-			if runes[j] == '.' && runes[j+1] == ' ' &&
-				runes[j+2] >= 'A' && runes[j+2] <= 'Z' {
-				if j > 0 && runes[j-1] >= 'a' && runes[j-1] <= 'z' {
-					ahead := string(runes[j+2:])
-					if len(strings.Fields(ahead)) >= 5 {
-						splitIdx = j + 2
-						break
-					}
-				}
-			}
-		}
-
-		// Pattern 2: "<lowercase> <Capital>" — no period, body text follows
-		// the last bullet point directly (e.g. "...offered The preceding...")
-		if splitIdx < 0 {
-			for j := 1; j < len(runes)-3; j++ {
-				if runes[j] >= 'a' && runes[j] <= 'z' &&
-					runes[j+1] == ' ' &&
-					runes[j+2] >= 'A' && runes[j+2] <= 'Z' {
-					ahead := string(runes[j+2:])
-					aheadWords := strings.Fields(ahead)
-					// Require more words (8+) and ending with period to confirm
-					// it's real body text, not just a proper noun mid-sentence
-					if len(aheadWords) >= 8 && strings.Contains(ahead, ".") {
-						splitIdx = j + 2
-						break
-					}
-				}
-			}
-		}
-
-		if splitIdx > 0 {
-			calloutPart := strings.TrimSpace(string(runes[:splitIdx]))
-			bodyPart := strings.TrimSpace(string(runes[splitIdx:]))
-			log.Printf("✂️ splitBodyFromCalloutLines: 已拆分 callout=%.50s body=%.50s",
-				calloutPart[len(calloutPart)-min(50, len(calloutPart)):],
-				bodyPart[:min(50, len(bodyPart))])
-			out = append(out, calloutPart)
-			out = append(out, "")
-			out = append(out, bodyPart)
-		} else {
-			out = append(out, line)
-		}
-	}
-
-	return strings.Join(out, "\n")
 }
 
 // mergeFalseParagraphBreaks does a second pass over paragraph-separated
