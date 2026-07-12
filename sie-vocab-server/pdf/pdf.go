@@ -351,8 +351,8 @@ type mergedLine struct {
 // buildStructuredText constructs the output text with heading markers.
 // It merges multi-line headings and drop caps before building the final output.
 func buildStructuredText(lines []textLine, bodySize int) string {
-	// Determine content top boundary to filter page-header decorations.
-	contentTop, _ := findContentBounds(lines, bodySize)
+	// Determine content boundaries to filter page-header/footer decorations.
+	contentTop, contentLast := findContentBounds(lines, bodySize)
 
 	// Phase 1: build raw lines with classification
 	var raw []mergedLine
@@ -363,7 +363,7 @@ func buildStructuredText(lines []textLine, bodySize int) string {
 			continue
 		}
 		vertGap := line.top - prevTop
-		if vertGap > 30 && line.top > 1000 &&
+		if vertGap > 30 && contentLast > 0 && line.top > contentLast &&
 			float64(line.maxFont)/float64(bodySize) < 1.5 {
 			continue
 		}
@@ -540,6 +540,12 @@ func findContentBounds(lines []textLine, bodySize int) (int, int) {
 	}
 	first, last := 0, 0
 	for _, line := range lines {
+		// Exclude header and footer zones, mirroring detectBodyFontSize.
+		// Page headers (top < 80) and footers (top > 1080) should not
+		// affect content boundary detection.
+		if line.top < 80 || line.top > 1080 {
+			continue
+		}
 		if line.maxFont < bodySize-1 || line.maxFont > bodySize+4 {
 			continue
 		}
