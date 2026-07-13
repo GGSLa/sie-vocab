@@ -339,7 +339,18 @@ function renderPage() {
         showEmpty('此页无内容');
         return;
     }
-    const chunk = pageData.chunks[0];
+
+    // Merge all chunks into one display
+    var allEn = [], allZh = [], allVocab = [], allGrammar = [];
+    for (var i = 0; i < pageData.chunks.length; i++) {
+        var c = pageData.chunks[i];
+        if (c.en) allEn.push(c.en);
+        if (c.zh) allZh.push(c.zh);
+        if (c.vocab) allVocab = allVocab.concat(c.vocab);
+        if (c.grammar) allGrammar = allGrammar.concat(c.grammar);
+    }
+    var mergedEn = allEn.join('\n\n');
+    var mergedZh = allZh.join('\n\n');
 
     let sectionHTML = '<h2>' + esc(pageData.section || '') + '</h2>';
     sectionHTML += '<span class="reader-page-num">PDF 第 ' + pageData.page + ' 页';
@@ -349,10 +360,10 @@ function renderPage() {
     sectionHTML += '</span>';
     document.getElementById('reader-section').innerHTML = sectionHTML;
 
-    document.getElementById('reader-en').innerHTML = formatText(chunk.en);
-    document.getElementById('reader-zh').innerHTML = formatText(chunk.zh);
-    renderVocab(chunk.vocab);
-    renderGrammar(chunk.grammar);
+    document.getElementById('reader-en').innerHTML = formatText(mergedEn);
+    document.getElementById('reader-zh').innerHTML = formatText(mergedZh);
+    renderVocab(allVocab);
+    renderGrammar(allGrammar);
 
     updatePageNav();
     hideLoading();
@@ -833,9 +844,23 @@ function renderLookupCardContent(words, mode) {
     return html;
 }
 
+function getAllVocab() {
+    // Build flat vocab array from all chunks
+    var result = [];
+    if (pageData && pageData.chunks) {
+        for (var i = 0; i < pageData.chunks.length; i++) {
+            if (pageData.chunks[i].vocab) {
+                result = result.concat(pageData.chunks[i].vocab);
+            }
+        }
+    }
+    return result;
+}
+
 async function saveVocabWord(index, btnEl) {
-    if (!pageData || !pageData.chunks || !pageData.chunks[0]) return;
-    const v = pageData.chunks[0].vocab[index];
+    var allVocab = getAllVocab();
+    if (allVocab.length === 0) return;
+    const v = allVocab[index];
     if (!v) return;
 
     // Step 1: Check if word already exists in DB

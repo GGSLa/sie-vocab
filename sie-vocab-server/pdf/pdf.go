@@ -359,17 +359,7 @@ func buildStructuredText(lines []textLine, bodySize int) string {
 	var prevTop int = -1000
 
 	for _, line := range lines {
-		if contentTop > 0 && line.top < contentTop-20 {
-			continue
-		}
-		vertGap := line.top - prevTop
-		if vertGap > 30 && contentLast > 0 && line.top > contentLast &&
-			float64(line.maxFont)/float64(bodySize) < 1.5 {
-			continue
-		}
-		prevTop = line.top
-
-		// Build text from elements
+		// Build text from elements (do this first so we can classify before filtering)
 		var lineText strings.Builder
 		lastRight := -100
 		lastFont := -1
@@ -401,6 +391,22 @@ func buildStructuredText(lines []textLine, bodySize int) string {
 		}
 
 		prefix := classifyLine(line, text, bodySize)
+
+		// Filter page-header/footer decorations, but keep heading lines.
+		// Headings (e.g. chapter titles) often sit above the body text area
+		// and should not be filtered by the contentTop boundary.
+		if prefix == "" {
+			if contentTop > 0 && line.top < contentTop-20 {
+				continue
+			}
+			vertGap := line.top - prevTop
+			if vertGap > 30 && contentLast > 0 && line.top > contentLast &&
+				float64(line.maxFont)/float64(bodySize) < 1.5 {
+				continue
+			}
+		}
+		prevTop = line.top
+
 		raw = append(raw, mergedLine{top: line.top, text: text, prefix: prefix, family: line.family})
 	}
 
@@ -516,6 +522,13 @@ func classifyLine(line textLine, text string, bodySize int) string {
 	}
 	// Skip single-word short text that may be drop-caps or labels
 	if len(text) < 3 {
+		return ""
+	}
+	// Refuse to classify lines in the page footer zone as headings.
+	// Page numbers and chapter running-heads at the bottom of the page
+	// can have larger font sizes and bold markers, but they are not
+	// content headings. (Page-top titles at Y < 80 are legitimate.)
+	if line.top > 1080 {
 		return ""
 	}
 	ratio := float64(line.maxFont) / float64(bodySize)
@@ -1171,7 +1184,8 @@ func parseOutline(d *xml.Decoder, level int) ([]TocItem, error) {
 
 // ───────── Cross-page paragraph helpers ─────────
 
-// GetLastParagraph returns the last paragraph block (text after the last \n\n).
+// GetLastParagraph returns the last body paragraph block (text after the last \n\n),
+// skipping heading blocks (#, ##, ###) which are self-contained and never "continued".
 func GetLastParagraph(text string) string {
 	text = strings.TrimSpace(text)
 	if text == "" {
@@ -1180,7 +1194,7 @@ func GetLastParagraph(text string) string {
 	blocks := strings.Split(text, "\n\n")
 	for i := len(blocks) - 1; i >= 0; i-- {
 		b := strings.TrimSpace(blocks[i])
-		if b != "" {
+		if b != "" && !isHeadingBlock(b) {
 			return b
 		}
 	}
@@ -1218,7 +1232,9 @@ func GetFirstParagraph(text string) string {
 	return ""
 }
 
-// RemoveFirstParagraph strips the first paragraph block from the text.
+// RemoveFirstParagraph strips the first body paragraph block from the text.
+// Heading blocks (#, ##, ###) at the beginning are preserved — only the first
+// non-heading paragraph (the continuation from the previous page) is removed.
 // Used when the first paragraph is a continuation from the previous page
 // and should only appear on the page where it starts.
 func RemoveFirstParagraph(text string) string {
@@ -1226,11 +1242,65 @@ func RemoveFirstParagraph(text string) string {
 	if text == "" {
 		return ""
 	}
-	idx := strings.Index(text, "\n\n")
-	if idx < 0 {
-		return "" // entire page is one continuation paragraph
+	blocks := strings.Split(text, "\n\n")
+	var headings []string
+	for i, b := range blocks {
+		b = strings.TrimSpace(b)
+		if b == "" {
+			continue
+		}
+		if isHeadingBlock(b) {
+			headings = append(headings, b)
+			continue
+		}
+		// Found the first non-heading block — this is the continuation.
+		// Remove it and reassemble from the remaining blocks.
+		remaining := blocks[i+1:]
+		var result []string
+		result = append(result, headings...)
+		for _, rb := range remaining {
+			rb = strings.TrimSpace(rb)
+			if rb != "" {
+				result = append(result, rb)
+			}
+		}
+		if len(result) == 0 {
+			return ""
+		}
+		return strings.Join(result, "\n\n")
 	}
-	return strings.TrimSpace(text[idx+2:])
+	// All blocks are headings — preserve everything
+	if len(headings) > 0 {
+		return strings.Join(headings, "\n\n")
+	}
+	return "" // entire page is one continuation paragraph with no headings
+}
+
+// isHeadingBlock returns true if every non-empty line in the block starts
+// with a markdown heading marker (# , ## , or ### ).
+func isHeadingBlock(block string) bool {
+	lines := strings.Split(block, "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if !strings.HasPrefix(line, "## ") && !strings.HasPrefix(line, "# ") {
+			return false
+		}
+		// Check ### specifically — must NOT be followed by another #
+		if strings.HasPrefix(line, "### ") {
+			continue
+		}
+		if strings.HasPrefix(line, "## ") {
+			continue
+		}
+		if strings.HasPrefix(line, "# ") {
+			continue
+		}
+		return false
+	}
+	return len(lines) > 0
 }
 
 // IsParagraphContinued returns true if the paragraph does not end with
