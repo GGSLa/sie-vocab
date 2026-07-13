@@ -354,6 +354,17 @@ func buildStructuredText(lines []textLine, bodySize int) string {
 	// Determine content boundaries to filter page-header/footer decorations.
 	contentTop, contentLast := findContentBounds(lines, bodySize)
 
+	// Compute the typical body text line spacing for dynamic paragraph detection.
+	typGap := typicalLineSpacing(lines, bodySize)
+	hardBreakGap := int(float64(typGap) * 1.8)
+	if hardBreakGap < 28 {
+		hardBreakGap = 28
+	}
+	softBreakGap := int(float64(typGap) * 1.3)
+	if softBreakGap < 18 {
+		softBreakGap = 18
+	}
+
 	// Phase 1: build raw lines with classification
 	var raw []mergedLine
 	var prevTop int = -1000
@@ -413,7 +424,11 @@ func buildStructuredText(lines []textLine, bodySize int) string {
 	// Phase 2: merge consecutive same-level headings and drop caps
 	merged := mergeRelatedLines(raw)
 
-	// Phase 3: output with paragraph breaks
+	// Phase 3: output with paragraph breaks.
+	// Uses dynamic thresholds derived from typical body line spacing:
+	//   vertGap >= hardBreakGap → \n\n\n  (hard break, layout-confirmed — never merged)
+	//   vertGap >  softBreakGap → \n\n    (soft break, may be merged by mergeFalseParagraphBreaks)
+	//   vertGap <= softBreakGap → \n      (normal line break within paragraph)
 	var out strings.Builder
 	prevWasHeading := false
 	lastTop := -1000
@@ -440,11 +455,20 @@ func buildStructuredText(lines []textLine, bodySize int) string {
 			prevWasHeading = true
 		} else {
 			if familySwitch && out.Len() > 0 {
-				out.WriteString("\n\n")
+				// Font family switch is a strong layout signal → hard break
+				out.WriteString("\n\n\n")
 			} else if prevWasHeading && vertGap > 15 {
 				out.WriteByte('\n')
-			} else if !prevWasHeading && vertGap > 20 && out.Len() > 0 {
-				out.WriteString("\n\n")
+			} else if !prevWasHeading && out.Len() > 0 {
+				if vertGap >= hardBreakGap {
+					// Large vertical gap → genuine paragraph break
+					out.WriteString("\n\n\n")
+				} else if vertGap > softBreakGap {
+					// Moderate gap → soft break (might be a false positive)
+					out.WriteString("\n\n")
+				} else {
+					out.WriteByte('\n')
+				}
 			} else if out.Len() > 0 && !strings.HasSuffix(out.String(), "\n") {
 				out.WriteByte('\n')
 			}
@@ -579,6 +603,40 @@ func findContentBounds(lines []textLine, bodySize int) (int, int) {
 		}
 	}
 	return first, last
+}
+
+// typicalLineSpacing returns the mode of vertical gaps between consecutive
+// body-sized lines within the content area. This is the "natural" line spacing
+// of body text, used to distinguish genuine paragraph breaks (typically 2× or
+// more of the line spacing) from false breaks caused by inline elements or
+// unusual glyph heights.
+func typicalLineSpacing(lines []textLine, bodySize int) int {
+	gapCount := make(map[int]int)
+	for i := 1; i < len(lines); i++ {
+		prev, curr := lines[i-1], lines[i]
+		// Only consider consecutive body-sized lines in the content zone
+		if prev.maxFont < bodySize-1 || prev.maxFont > bodySize+4 {
+			continue
+		}
+		if curr.maxFont < bodySize-1 || curr.maxFont > bodySize+4 {
+			continue
+		}
+		if prev.top < 80 || prev.top > 1080 || curr.top < 80 || curr.top > 1080 {
+			continue
+		}
+		gap := curr.top - prev.top
+		if gap > 0 && gap < 50 { // ignore huge gaps (page breaks, large headings)
+			gapCount[gap]++
+		}
+	}
+	bestGap, bestCount := 18, 0 // default: assume 18px line spacing
+	for gap, count := range gapCount {
+		if count > bestCount {
+			bestCount = count
+			bestGap = gap
+		}
+	}
+	return bestGap
 }
 
 // allElementsInRightColumn returns true if all text elements are positioned
@@ -788,6 +846,28 @@ func ExtractPageTextHybrid(pdfPath string, page int, lang string) (string, error
 // and joins them, while keeping real paragraph breaks (blank lines),
 // headings (# markers), and callout/sidebar lines (» markers) intact.
 func mergeHardWrappedLines(text string) string {
+	// First split by hard paragraph breaks (\n\n\n) into segments.
+	// Hard breaks are layout-confirmed (large vertical gaps in PDF) and
+	// must never be merged. Only soft breaks (\n\n) within each segment
+	// are candidates for mergeFalseParagraphBreaks.
+	hardSegments := strings.Split(text, "\n\n\n")
+	var hardResults []string
+
+	for _, segment := range hardSegments {
+		segment = strings.TrimSpace(segment)
+		if segment == "" {
+			continue
+		}
+		hardResults = append(hardResults, processSegment(segment))
+	}
+
+	return strings.Join(hardResults, "\n\n")
+}
+
+// processSegment handles the merging within a single hard-break-separated segment.
+// Soft paragraph breaks (\n\n) within the segment may be merged if they appear
+// to be false breaks (e.g. PDF hard-wrapping artifacts).
+func processSegment(text string) string {
 	// Split into paragraph blocks (blank-line separated)
 	blocks := strings.Split(text, "\n\n")
 	var resultBlocks []string
