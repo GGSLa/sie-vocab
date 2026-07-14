@@ -414,7 +414,8 @@ func detectTableRegions(lines []textLine) []tableRegion {
 			regionEnd := sigs[j-1].idx + 1
 
 			columns := detectColumns(lines[regionStart:regionEnd])
-			if len(columns) >= 2 && medianColumnGap(columns) >= 50 {
+			if len(columns) >= 2 && medianColumnGap(columns) >= 50 &&
+				validateTableColumns(lines[regionStart:regionEnd], columns) {
 				regions = append(regions, tableRegion{
 					startIdx: regionStart,
 					endIdx:   regionEnd,
@@ -514,6 +515,37 @@ func medianColumnGap(columns []tableColumn) int {
 	}
 	sortInts(gaps)
 	return gaps[len(gaps)/2]
+}
+
+// validateTableColumns checks that the detected columns consistently appear
+// across lines in the candidate table region. Multi-column flowing text
+// (not a real table) typically has inconsistent column presence — only a
+// few lines match the full column structure while most lines are single-column
+// continuation text. Requires ≥75% of region lines to span ≥(nCols-1) columns.
+func validateTableColumns(lines []textLine, columns []tableColumn) bool {
+	if len(columns) < 2 || len(lines) < 3 {
+		return false
+	}
+	minCols := len(columns) - 1
+	if minCols < 2 {
+		minCols = 2
+	}
+	matchCount := 0
+	for _, line := range lines {
+		cols := 0
+		for _, col := range columns {
+			for _, el := range line.elements {
+				if el.left >= col.leftMin-10 && el.left <= col.leftMax+10 {
+					cols++
+					break
+				}
+			}
+		}
+		if cols >= minCols {
+			matchCount++
+		}
+	}
+	return matchCount >= (len(lines)*3)/4
 }
 
 // sortInts sorts a slice of ints in ascending order.
