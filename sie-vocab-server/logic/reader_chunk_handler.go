@@ -141,12 +141,16 @@ func (h *ReaderChunkHandler) GetChunk(bookID, page int, userID int) (*model.Read
 	}
 
 	// 4. Cross-page paragraph handling
-	// 4a. Check if first paragraph is continuation from previous page → remove it
+	// 4a. Check if first paragraph is continuation from previous page → remove it.
+	// Only remove if the current page does NOT start a new section (heading/list/table/callout).
+	// If the current page starts a new section, the previous page's last paragraph
+	// is self-contained even if it lacks sentence-ending punctuation.
 	if page > 1 {
 		prevText, err := pdf.ExtractPageTextHybrid(pdfPath, page-1, ocrLang)
 		if err == nil && prevText != "" {
 			lastParaPrev := pdf.GetLastParagraph(prevText)
-			if lastParaPrev != "" && pdf.IsParagraphContinued(lastParaPrev) {
+			if lastParaPrev != "" && pdf.IsParagraphContinued(lastParaPrev) &&
+				!pdf.PageStartsWithSpecialBlock(pageText) {
 				trimmed := pdf.RemoveFirstParagraph(pageText)
 				if trimmed != "" {
 					log.Printf("📎 首段归前页: book=%d page=%d, 前页末段未闭合，本页首段移除 %d→%d 字", bookID, page, len(pageText), len(trimmed))
@@ -156,15 +160,22 @@ func (h *ReaderChunkHandler) GetChunk(bookID, page int, userID int) (*model.Read
 		}
 	}
 
-	// 4b. Check if last paragraph continues to next page → append continuation
+	// 4b. Check if last paragraph continues to next page → append continuation.
+	// Only append if the next page does NOT start a new section (heading/list/table/callout).
+	// If the next page starts a new section, the current page's last paragraph
+	// is self-contained even if it lacks sentence-ending punctuation.
 	lastParaCurr := pdf.GetLastParagraph(pageText)
 	if lastParaCurr != "" && pdf.IsParagraphContinued(lastParaCurr) {
 		nextText, err := pdf.ExtractPageTextHybrid(pdfPath, page+1, ocrLang)
 		if err == nil && nextText != "" {
-			firstParaNext := pdf.GetFirstParagraph(nextText)
-			if firstParaNext != "" {
-				pageText += "\n" + firstParaNext
-				log.Printf("📎 末段跨页补齐: book=%d page=%d, 从 page=%d 取了 %d 字", bookID, page, page+1, len(firstParaNext))
+			if pdf.PageStartsWithSpecialBlock(nextText) {
+				log.Printf("📎 末段未跨页: book=%d page=%d, 下页首段为新章节，跳过补齐", bookID, page)
+			} else {
+				firstParaNext := pdf.GetFirstParagraph(nextText)
+				if firstParaNext != "" {
+					pageText += "\n" + firstParaNext
+					log.Printf("📎 末段跨页补齐: book=%d page=%d, 从 page=%d 取了 %d 字", bookID, page, page+1, len(firstParaNext))
+				}
 			}
 		}
 	}

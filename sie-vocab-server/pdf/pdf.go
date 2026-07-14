@@ -1716,11 +1716,60 @@ func isHeadingBlock(block string) bool {
 
 // IsParagraphContinued returns true if the paragraph does not end with
 // sentence-ending punctuation, indicating it likely continues to the next page.
+// Special blocks (tables, lists, callouts) are always considered self-contained
+// regardless of the last character.
 func IsParagraphContinued(para string) bool {
 	para = strings.TrimSpace(para)
 	if para == "" {
 		return false
 	}
+	// Check the last line — if it's a table, list item, or callout, the block
+	// is self-contained. Tables rows end with cell content, list items often
+	// lack sentence-ending punctuation, and callouts are standalone by design.
+	lines := strings.Split(para, "\n")
+	lastLine := strings.TrimSpace(lines[len(lines)-1])
+	if isTableLine(lastLine) || isListItem(lastLine) || isCalloutLine(lastLine) {
+		return false
+	}
 	last := para[len(para)-1]
 	return last != '.' && last != '!' && last != '?' && last != '"' && last != ')' && last != ':'
+}
+
+// PageStartsWithSpecialBlock returns true if the first meaningful non-empty
+// block of the page text is a heading, list item, callout, or table.
+// This indicates the page starts a new topic — the previous page's last
+// paragraph (even if lacking sentence-ending punctuation) is self-contained
+// and should NOT be treated as continued across pages.
+func PageStartsWithSpecialBlock(text string) bool {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return false
+	}
+	blocks := strings.Split(text, "\n\n")
+	for _, b := range blocks {
+		b = strings.TrimSpace(b)
+		if b == "" {
+			continue
+		}
+		if isHeadingBlock(b) {
+			return true
+		}
+		// Check the first non-empty line of this block
+		lines := strings.Split(b, "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			if strings.HasPrefix(line, "#") {
+				return true
+			}
+			if isListItem(line) || isCalloutLine(line) || isTableLine(line) {
+				return true
+			}
+			// First non-empty line is body text — page does not start special
+			return false
+		}
+	}
+	return false
 }
