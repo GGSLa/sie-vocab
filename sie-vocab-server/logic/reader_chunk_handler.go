@@ -16,10 +16,10 @@ import (
 	"sie-vocab-server/repo"
 )
 
-// flightKey 用于 in-flight 请求去重：{bookID, page}
+// flightKey 用于 in-flight 请求去重：{contentHash, page}
 type flightKey struct {
-	bookID int
-	page   int
+	contentHash string
+	page        int
 }
 
 // ReaderChunkHandler 阅读页 AI 分析业务编排
@@ -47,7 +47,7 @@ func NewReaderChunkHandler(apiKey string, bookRepo *repo.BookRepo, cacheRepo *re
 func (h *ReaderChunkHandler) GetChunk(bookID, page int, userID int) (*model.ReaderChunkResponse, error) {
 	log.Printf("📖 阅读请求: book=%d page=%d", bookID, page)
 
-	// 获取书籍信息（pdf路径 + OCR语言）
+	// 获取书籍信息（pdf路径 + OCR语言 + 内容哈希）
 	book, err := h.bookRepo.FindByID(bookID, userID)
 	if err != nil {
 		return nil, fmt.Errorf("书籍不存在: book_id=%d", bookID)
@@ -57,8 +57,9 @@ func (h *ReaderChunkHandler) GetChunk(bookID, page int, userID int) (*model.Read
 	if ocrLang == "" {
 		ocrLang = "eng"
 	}
+	contentHash := book.ContentHash
 
-	// 1. Check cache
+	// 1. Check cache — 先按 book_id 查（快速路径），miss 则按 content_hash 跨书查
 	cached, err := h.cacheRepo.FindByPage(bookID, page)
 	if err == nil && cached != nil {
 		log.Printf("✅ reader 缓存命中: book=%d page=%d chunks=%d", bookID, page, cached.TotalChunks)
@@ -69,8 +70,26 @@ func (h *ReaderChunkHandler) GetChunk(bookID, page int, userID int) (*model.Read
 		log.Printf("⚠️ 查询 reader_cache 失败: %v", err)
 	}
 
-	// 2. Deduplicate concurrent requests for the same (book, page)
-	key := flightKey{bookID: bookID, page: page}
+	// 1b. 跨书缓存查找（相同内容哈希的其他书）
+	if contentHash != "" {
+		cached, err = h.cacheRepo.FindByContentHash(contentHash, page)
+		if err == nil && cached != nil {
+			log.Printf("✅ reader 缓存命中(content_hash): book=%d page=%d hash=%s chunks=%d", bookID, page, contentHash[:16], cached.TotalChunks)
+			cached.BookID = bookID
+			return cached, nil
+		}
+		if err != nil && err != gorm.ErrRecordNotFound {
+			log.Printf("⚠️ 跨书缓存查询失败: %v", err)
+		}
+	}
+
+	// 2. Deduplicate concurrent requests for the same (content_hash, page)
+	// 使用 contentHash 作为去重键，防止相同内容的不同 book_id 同时触发 AI
+	key := flightKey{contentHash: contentHash, page: page}
+	if contentHash == "" {
+		// 旧书无 hash，回退用 bookID 去重
+		key = flightKey{contentHash: fmt.Sprintf("book:%d", bookID), page: page}
+	}
 	h.flightsMu.Lock()
 	if ch, exists := h.flights[key]; exists {
 		h.flightsMu.Unlock()
@@ -81,10 +100,18 @@ func (h *ReaderChunkHandler) GetChunk(bookID, page int, userID int) (*model.Read
 			log.Printf("⚠️ reader flight timeout: book=%d page=%d", bookID, page)
 			return nil, fmt.Errorf("请求超时，请稍后重试")
 		}
+		// Re-check cache after wait — 同样两级查找
 		if cached2, err2 := h.cacheRepo.FindByPage(bookID, page); err2 == nil && cached2 != nil {
 			log.Printf("✅ reader 缓存命中 (after wait): book=%d page=%d chunks=%d", bookID, page, cached2.TotalChunks)
 			cached2.BookID = bookID
 			return cached2, nil
+		}
+		if contentHash != "" {
+			if cached2, err2 := h.cacheRepo.FindByContentHash(contentHash, page); err2 == nil && cached2 != nil {
+				log.Printf("✅ reader 缓存命中(content_hash, after wait): book=%d page=%d chunks=%d", bookID, page, cached2.TotalChunks)
+				cached2.BookID = bookID
+				return cached2, nil
+			}
 		}
 	} else {
 		ch := make(chan struct{})

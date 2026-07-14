@@ -88,3 +88,55 @@ func (r *ReaderCacheRepo) AllCachedPages(bookID int) ([]TocEntry, error) {
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Page < entries[j].Page })
 	return entries, nil
 }
+
+// FindByContentHash 通过内容哈希跨书查找缓存（相同 PDF 不同 book_id 共享）
+func (r *ReaderCacheRepo) FindByContentHash(hash string, page int) (*model.ReaderChunkResponse, error) {
+	if hash == "" {
+		return nil, gorm.ErrRecordNotFound
+	}
+	var c ReaderCache
+	err := r.db.Table("reader_cache rc").
+		Select("rc.*").
+		Joins("JOIN books b ON rc.book_id = b.id").
+		Where("b.content_hash = ? AND rc.page = ?", hash, page).
+		First(&c).Error
+	if err != nil {
+		return nil, err
+	}
+	var result model.ReaderChunkResponse
+	if err := json.Unmarshal([]byte(c.AIResponse), &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// AllCachedPagesByHash 通过内容哈希获取所有同内容书的已缓存页面（去重）
+func (r *ReaderCacheRepo) AllCachedPagesByHash(hash string) ([]TocEntry, error) {
+	if hash == "" {
+		return []TocEntry{}, nil
+	}
+	var entries []TocEntry
+	err := r.db.Table("reader_cache rc").
+		Select("rc.page, rc.section_title as section").
+		Joins("JOIN books b ON rc.book_id = b.id").
+		Where("b.content_hash = ?", hash).
+		Order("rc.page ASC").
+		Scan(&entries).Error
+	if err != nil {
+		return nil, err
+	}
+	if entries == nil {
+		entries = []TocEntry{}
+	}
+	// Deduplicate by page (multiple books with same hash may have same page cached)
+	seen := make(map[int]bool)
+	deduped := make([]TocEntry, 0, len(entries))
+	for _, e := range entries {
+		if !seen[e.Page] {
+			seen[e.Page] = true
+			deduped = append(deduped, e)
+		}
+	}
+	sort.Slice(deduped, func(i, j int) bool { return deduped[i].Page < deduped[j].Page })
+	return deduped, nil
+}

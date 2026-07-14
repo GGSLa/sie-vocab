@@ -87,6 +87,10 @@ func AutoMigrate(db *gorm.DB) error {
 		safeExec(db, "ALTER TABLE books ADD COLUMN user_id INT NOT NULL DEFAULT 0 AFTER id", "books.user_id")
 		safeExec(db, "ALTER TABLE books ADD INDEX idx_books_user_id (user_id)", "books.idx_user_id")
 	}
+	if !columnExists(db, "books", "content_hash") {
+		safeExec(db, "ALTER TABLE books ADD COLUMN content_hash VARCHAR(64) NOT NULL DEFAULT '' AFTER page_count", "books.content_hash")
+		safeExec(db, "ALTER TABLE books ADD INDEX idx_books_content_hash (content_hash)", "books.idx_content_hash")
+	}
 
 	// words — 重建唯一索引
 	if !columnExists(db, "words", "user_id") {

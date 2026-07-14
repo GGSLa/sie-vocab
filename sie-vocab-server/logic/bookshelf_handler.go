@@ -2,6 +2,8 @@ package logic
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"log"
 	"os"
@@ -92,6 +94,10 @@ func (h *BookshelfHandler) Create(title, author, description, ocrLang string, pd
 		return nil, fmt.Errorf("创建上传目录失败: %v", err)
 	}
 
+	// 计算 PDF 内容哈希（SHA-256），用于跨用户缓存共享
+	hash := sha256.Sum256(pdfData)
+	contentHash := hex.EncodeToString(hash[:])
+
 	// 先在 DB 中创建记录（获取 ID）
 	row := &repo.Book{
 		UserID:      userID,
@@ -100,6 +106,7 @@ func (h *BookshelfHandler) Create(title, author, description, ocrLang string, pd
 		Description: description,
 		PDFPath:     "", // 稍后更新
 		OCRLang:     ocrLang,
+		ContentHash: contentHash,
 	}
 	if err := h.bookRepo.Create(row); err != nil {
 		return nil, fmt.Errorf("创建书籍记录失败: %v", err)
@@ -138,8 +145,20 @@ func (h *BookshelfHandler) Delete(bookID int, userID int) error {
 	}
 
 	// 删除关联数据（cache + progress）
-	if err := h.bookRepo.DeleteCacheByBook(bookID); err != nil {
-		log.Printf("⚠️ 删除 reader_cache 失败 (book=%d): %v", bookID, err)
+	// 仅当没有其他书共享同一 content_hash 时才删除缓存
+	if book.ContentHash != "" {
+		siblings, _ := h.bookRepo.FindBooksByHash(book.ContentHash, bookID)
+		if len(siblings) == 0 {
+			if err := h.bookRepo.DeleteCacheByBook(bookID); err != nil {
+				log.Printf("⚠️ 删除 reader_cache 失败 (book=%d): %v", bookID, err)
+			}
+		} else {
+			log.Printf("📚 缓存共享保留: book=%d hash=%s 仍有 %d 本其他书持有", bookID, book.ContentHash[:16], len(siblings))
+		}
+	} else {
+		if err := h.bookRepo.DeleteCacheByBook(bookID); err != nil {
+			log.Printf("⚠️ 删除 reader_cache 失败 (book=%d): %v", bookID, err)
+		}
 	}
 	if err := h.bookRepo.DeleteProgressByBook(bookID, userID); err != nil {
 		log.Printf("⚠️ 删除 reader_progress 失败 (book=%d): %v", bookID, err)

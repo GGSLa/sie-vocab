@@ -11,6 +11,7 @@ type Book struct {
 	PDFPath     string    `json:"pdf_path"`
 	OCRLang     string    `json:"ocr_lang"`
 	PageCount   int       `json:"page_count"`
+	ContentHash string    `json:"content_hash"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }

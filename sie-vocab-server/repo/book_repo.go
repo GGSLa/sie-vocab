@@ -18,6 +18,7 @@ type Book struct {
 	PDFPath     string    `gorm:"column:pdf_path"`
 	OCRLang     string    `gorm:"column:ocr_lang"`
 	PageCount   int       `gorm:"column:page_count"`
+	ContentHash string    `gorm:"column:content_hash"`
 	CreatedAt   time.Time `gorm:"column:created_at"`
 	UpdatedAt   time.Time `gorm:"column:updated_at"`
 }
@@ -98,7 +99,21 @@ func bookRowToModel(row Book) model.Book {
 		PDFPath:     row.PDFPath,
 		OCRLang:     row.OCRLang,
 		PageCount:   row.PageCount,
+		ContentHash: row.ContentHash,
 		CreatedAt:   row.CreatedAt,
 		UpdatedAt:   row.UpdatedAt,
 	}
+}
+
+// FindBooksByHash 查找与指定 hash 相同但 ID 不同的书（用于判断缓存是否可安全删除）
+func (r *BookRepo) FindBooksByHash(hash string, excludeID int) ([]Book, error) {
+	if hash == "" {
+		return nil, nil
+	}
+	var rows []Book
+	err := r.db.Where("content_hash = ? AND id != ?", hash, excludeID).Find(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	return rows, nil
 }

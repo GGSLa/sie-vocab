@@ -38,7 +38,13 @@ func (h *ReaderTOCHandler) GetTOC(bookID int, userID int) (*TOCResult, error) {
 	outline, err := pdf.ExtractOutline(book.PDFPath)
 	if err != nil {
 		log.Printf("⚠️ 提取 PDF 大纲失败，回退到缓存页面: %v", err)
-		entries, err2 := h.cacheRepo.AllCachedPages(bookID)
+		var entries []repo.TocEntry
+		var err2 error
+		if book.ContentHash != "" {
+			entries, err2 = h.cacheRepo.AllCachedPagesByHash(book.ContentHash)
+		} else {
+			entries, err2 = h.cacheRepo.AllCachedPages(bookID)
+		}
 		if err2 != nil {
 			log.Printf("❌ 获取缓存页面也失败: %v", err2)
 			return nil, err2
@@ -49,7 +55,13 @@ func (h *ReaderTOCHandler) GetTOC(bookID int, userID int) (*TOCResult, error) {
 	result.Outline = outline
 
 	// Get cached page numbers for visual markers
-	entries, _ := h.cacheRepo.AllCachedPages(bookID)
+	// 使用 AllCachedPagesByHash 支持跨书缓存共享
+	var entries []repo.TocEntry
+	if book.ContentHash != "" {
+		entries, _ = h.cacheRepo.AllCachedPagesByHash(book.ContentHash)
+	} else {
+		entries, _ = h.cacheRepo.AllCachedPages(bookID)
+	}
 	cachedPages := make(map[int]bool)
 	for _, e := range entries {
 		cachedPages[e.Page] = true
