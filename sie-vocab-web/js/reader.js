@@ -380,6 +380,12 @@ function formatText(text) {
         const trimmed = blocks[i].trim();
         if (!trimmed) continue;
 
+        // Detect markdown table: all non-empty lines start with | and there's a separator line
+        if (isMarkdownTable(trimmed)) {
+            html += renderMarkdownTable(trimmed);
+            continue;
+        }
+
         // Group consecutive » (callout) blocks into a single <p>
         if (trimmed.startsWith('»')) {
             let groupHTML = '';
@@ -430,6 +436,57 @@ function formatText(text) {
         }
     }
     return html || '<p class="empty-note">（无内容）</p>';
+}
+
+// isMarkdownTable returns true if the block looks like a markdown pipe table:
+// all non-empty lines start and end with |, at least 2 data lines,
+// and at least one separator line (|----|----|).
+function isMarkdownTable(block) {
+    const lines = block.split('\n').map(l => l.trim()).filter(l => l);
+    if (lines.length < 2) return false;
+    const allPipes = lines.every(l => l.startsWith('|') && l.endsWith('|'));
+    if (!allPipes) return false;
+    const hasSeparator = lines.some(l => /^\|[\s\-:|]+\|$/.test(l));
+    return hasSeparator;
+}
+
+// renderMarkdownTable converts a markdown pipe table block to an HTML <table>.
+function renderMarkdownTable(block) {
+    const lines = block.split('\n').map(l => l.trim()).filter(l => l.startsWith('|'));
+    if (lines.length < 2) return '<p class="empty-note">（空表格）</p>';
+
+    let html = '<table class="md-table"><thead>';
+    let inHeader = true;
+
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        // Skip separator lines (|----|----|)
+        if (/^\|[\s\-:|]+\|$/.test(line)) {
+            if (inHeader) {
+                html += '</thead><tbody>';
+                inHeader = false;
+            }
+            continue;
+        }
+
+        // Split cells: remove leading/trailing |, then split by |
+        const rawCells = line.replace(/^\|\s*/, '').replace(/\s*\|$/, '').split('|');
+        const tag = inHeader ? 'th' : 'td';
+
+        html += '<tr>';
+        rawCells.forEach(cell => {
+            const cellText = cell.trim();
+            const safe = esc(cellText);
+            // Make English words clickable within table cells
+            const clickable = safe.replace(/\b([a-zA-Z]+(?:'[a-zA-Z]+)?)\b/g,
+                '<span class="word-clickable" data-word="$1" onclick="lookupWord(this)" title="点击查词">$1</span>');
+            html += '<' + tag + '>' + clickable + '</' + tag + '>';
+        });
+        html += '</tr>';
+    }
+
+    html += '</tbody></table>';
+    return html;
 }
 
 function renderVocab(vocab) {

@@ -348,6 +348,296 @@ type mergedLine struct {
 	family  string // font family for callout/body detection
 }
 
+// ---------- Table detection ----------
+
+// tableColumn represents a detected column in a PDF table.
+type tableColumn struct {
+	leftMin int
+	leftMax int
+}
+
+// tableRegion represents a detected table within a page.
+type tableRegion struct {
+	startIdx int           // index into sorted lines array
+	endIdx   int           // exclusive
+	topY     int
+	columns  []tableColumn
+}
+
+// detectTableRegions identifies table regions within sorted lines.
+// It looks for runs of consecutive lines where text elements form a grid:
+//  1. Multiple elements per line (≥2)
+//  2. Consistent left-edge alignment across consecutive lines (≥2 shared within 15px)
+//  3. Wide column gaps (median ≥50px, to distinguish from bulleted lists)
+func detectTableRegions(lines []textLine) []tableRegion {
+	if len(lines) < 3 {
+		return nil
+	}
+
+	// For each line with ≥2 elements, extract quantized left-edge positions
+	type lineSig struct {
+		idx   int
+		top   int
+		edges []int // sorted, unique, quantized to 15px buckets
+	}
+
+	var sigs []lineSig
+	for i, line := range lines {
+		edgeSet := make(map[int]bool)
+		for _, el := range line.elements {
+			edgeSet[(el.left+7)/15*15] = true // quantize to 15px
+		}
+		if len(edgeSet) < 2 {
+			continue
+		}
+		var edges []int
+		for e := range edgeSet {
+			edges = append(edges, e)
+		}
+		sortInts(edges)
+		sigs = append(sigs, lineSig{idx: i, top: line.top, edges: edges})
+	}
+
+	// Scan for runs where consecutive lines share ≥2 column edges
+	var regions []tableRegion
+	i := 0
+	for i < len(sigs)-2 {
+		if countSharedEdges(sigs[i].edges, sigs[i+1].edges) >= 2 &&
+			countSharedEdges(sigs[i+1].edges, sigs[i+2].edges) >= 2 {
+			start := i
+			j := i + 1
+			for j < len(sigs) && countSharedEdges(sigs[j-1].edges, sigs[j].edges) >= 2 {
+				j++
+			}
+
+			regionStart := sigs[start].idx
+			regionEnd := sigs[j-1].idx + 1
+
+			columns := detectColumns(lines[regionStart:regionEnd])
+			if len(columns) >= 2 && medianColumnGap(columns) >= 50 {
+				regions = append(regions, tableRegion{
+					startIdx: regionStart,
+					endIdx:   regionEnd,
+					topY:     sigs[start].top,
+					columns:  columns,
+				})
+			}
+			i = j
+		} else {
+			i++
+		}
+	}
+
+	return regions
+}
+
+// countSharedEdges returns how many left-edge positions two lines share
+// within a 15px tolerance.
+func countSharedEdges(a, b []int) int {
+	count := 0
+	for _, ea := range a {
+		for _, eb := range b {
+			if abs(ea-eb) <= 15 {
+				count++
+				break
+			}
+		}
+	}
+	return count
+}
+
+// detectColumns clusters left-edge positions from all lines in a table region
+// to identify column boundaries.
+func detectColumns(lines []textLine) []tableColumn {
+	var lefts []int
+	for _, line := range lines {
+		for _, el := range line.elements {
+			lefts = append(lefts, el.left)
+		}
+	}
+	sortInts(lefts)
+
+	if len(lefts) < 2 {
+		return nil
+	}
+
+	// Cluster by gap > 20px
+	type cluster struct {
+		leftMin int
+		leftMax int
+		count   int
+	}
+
+	var clusters []cluster
+	cur := cluster{leftMin: lefts[0], leftMax: lefts[0], count: 1}
+	for i := 1; i < len(lefts); i++ {
+		if lefts[i]-lefts[i-1] > 20 {
+			clusters = append(clusters, cur)
+			cur = cluster{leftMin: lefts[i], leftMax: lefts[i], count: 1}
+		} else {
+			if lefts[i] > cur.leftMax {
+				cur.leftMax = lefts[i]
+			}
+			cur.count++
+		}
+	}
+	clusters = append(clusters, cur)
+
+	// Keep clusters that appear in ≥2 distinct lines
+	var columns []tableColumn
+	for _, c := range clusters {
+		lineCount := 0
+		for _, line := range lines {
+			for _, el := range line.elements {
+				if el.left >= c.leftMin-10 && el.left <= c.leftMax+10 {
+					lineCount++
+					break
+				}
+			}
+		}
+		if lineCount >= 2 {
+			columns = append(columns, tableColumn{leftMin: c.leftMin, leftMax: c.leftMax})
+		}
+	}
+
+	return columns
+}
+
+// medianColumnGap returns the median gap between adjacent columns.
+func medianColumnGap(columns []tableColumn) int {
+	if len(columns) < 2 {
+		return 0
+	}
+	var gaps []int
+	for i := 1; i < len(columns); i++ {
+		gaps = append(gaps, columns[i].leftMin-columns[i-1].leftMax)
+	}
+	sortInts(gaps)
+	return gaps[len(gaps)/2]
+}
+
+// sortInts sorts a slice of ints in ascending order.
+func sortInts(a []int) {
+	for i := 0; i < len(a); i++ {
+		for j := i + 1; j < len(a); j++ {
+			if a[i] > a[j] {
+				a[i], a[j] = a[j], a[i]
+			}
+		}
+	}
+}
+
+// buildTableMarkdown formats a table region as a markdown pipe table.
+// Lines are grouped into logical rows (handling multi-line cells), the first
+// row group becomes the table header, and the rest become data rows.
+func buildTableMarkdown(lines []textLine, columns []tableColumn) string {
+	if len(lines) < 2 || len(columns) < 2 {
+		return ""
+	}
+
+	rows := groupTableRows(lines)
+	if len(rows) < 2 {
+		return "" // need at least header + 1 data row
+	}
+
+	var out strings.Builder
+
+	// Header row
+	headerCells := buildRowCells(lines, rows[0], columns)
+	out.WriteString("| ")
+	out.WriteString(strings.Join(headerCells, " | "))
+	out.WriteString(" |\n")
+
+	// Separator
+	out.WriteString("|")
+	for range columns {
+		out.WriteString("------|")
+	}
+	out.WriteString("\n")
+
+	// Data rows
+	for _, row := range rows[1:] {
+		cells := buildRowCells(lines, row, columns)
+		out.WriteString("| ")
+		out.WriteString(strings.Join(cells, " | "))
+		out.WriteString(" |\n")
+	}
+
+	return strings.TrimSpace(out.String())
+}
+
+// groupTableRows groups table lines into logical rows.
+// Multi-line cells are detected by gap analysis: if the gap distribution
+// within the table region is bimodal (ratio > 1.4), smaller gaps are
+// intra-row continuations; otherwise every line is its own row.
+func groupTableRows(lines []textLine) [][]int {
+	if len(lines) <= 1 {
+		return [][]int{{0}}
+	}
+
+	gaps := make([]int, len(lines)-1)
+	for i := 1; i < len(lines); i++ {
+		gaps[i-1] = lines[i].top - lines[i-1].top
+	}
+
+	minGap, maxGap := gaps[0], gaps[0]
+	for _, g := range gaps {
+		if g < minGap {
+			minGap = g
+		}
+		if g > maxGap {
+			maxGap = g
+		}
+	}
+
+	var rowThreshold int
+	if maxGap > minGap && float64(maxGap)/float64(minGap) > 1.4 {
+		// Bimodal: split between the two modes (intra-row vs inter-row gaps)
+		rowThreshold = (minGap + maxGap) / 2
+	} else {
+		// Unimodal: every line is its own row
+		rowThreshold = minGap - 1
+		if rowThreshold < 1 {
+			rowThreshold = 1
+		}
+	}
+
+	var rows [][]int
+	currentRow := []int{0}
+	for i := 1; i < len(lines); i++ {
+		gap := lines[i].top - lines[i-1].top
+		if gap > rowThreshold {
+			rows = append(rows, currentRow)
+			currentRow = []int{i}
+		} else {
+			currentRow = append(currentRow, i)
+		}
+	}
+	rows = append(rows, currentRow)
+
+	return rows
+}
+
+// buildRowCells extracts cell text for each column in a logical table row.
+func buildRowCells(lines []textLine, rowLineIdxs []int, columns []tableColumn) []string {
+	cells := make([]string, len(columns))
+
+	for ci, col := range columns {
+		var parts []string
+		for _, li := range rowLineIdxs {
+			for _, el := range lines[li].elements {
+				if el.left >= col.leftMin-5 && el.left <= col.leftMax+5 {
+					parts = append(parts, el.text)
+					break // one element per column per source line
+				}
+			}
+		}
+		cells[ci] = strings.Join(parts, " ")
+	}
+
+	return cells
+}
+
 // buildStructuredText constructs the output text with heading markers.
 // It merges multi-line headings and drop caps before building the final output.
 func buildStructuredText(lines []textLine, bodySize int) string {
@@ -365,11 +655,38 @@ func buildStructuredText(lines []textLine, bodySize int) string {
 		softBreakGap = 18
 	}
 
+	// Phase 0: detect table regions before building raw lines.
+	// Tables are formatted as markdown pipe tables and treated as single blocks.
+	tables := detectTableRegions(lines)
+	tableByStart := make(map[int]tableRegion)
+	tableSkip := make(map[int]bool)
+	for _, t := range tables {
+		tableByStart[t.startIdx] = t
+		for idx := t.startIdx; idx < t.endIdx; idx++ {
+			tableSkip[idx] = true
+		}
+	}
+
 	// Phase 1: build raw lines with classification
 	var raw []mergedLine
 	var prevTop int = -1000
 
-	for _, line := range lines {
+	for i, line := range lines {
+		// Handle table region start — format entire table as one block
+		if t, ok := tableByStart[i]; ok {
+			tableText := buildTableMarkdown(lines[t.startIdx:t.endIdx], t.columns)
+			if tableText != "" {
+				raw = append(raw, mergedLine{top: t.topY, text: tableText, prefix: "", family: ""})
+				prevTop = t.topY
+			}
+			continue
+		}
+
+		// Skip lines that belong to a table (already handled above)
+		if tableSkip[i] {
+			continue
+		}
+
 		// Build text from elements (do this first so we can classify before filtering)
 		var lineText strings.Builder
 		lastRight := -100
@@ -918,6 +1235,16 @@ func processSegment(text string) string {
 				continue
 			}
 
+			// Markdown table lines (pipe tables) — keep standalone, never merge
+			if isTableLine(line) {
+				if current != "" {
+					merged = append(merged, current)
+					current = ""
+				}
+				merged = append(merged, line)
+				continue
+			}
+
 			// Bullet points and numbered lists — keep standalone
 			if isListItem(line) {
 				if current != "" {
@@ -1118,6 +1445,10 @@ func isHeadingLine(line string) bool {
 
 func isCalloutLine(line string) bool {
 	return strings.HasPrefix(line, "»")
+}
+
+func isTableLine(line string) bool {
+	return strings.HasPrefix(line, "|")
 }
 
 func isListItem(line string) bool {

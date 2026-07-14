@@ -1523,6 +1523,54 @@
     vertical-align: middle;
 }
 .vocab-table tbody tr:hover { background: #fafbff; }
+
+/* Markdown table rendered from PDF content */
+.md-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 12px 0;
+    font-size: 0.95rem;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    overflow: hidden;
+}
+.md-table thead th {
+    background: linear-gradient(135deg, #1e3a5f, #2d5a87);
+    padding: 10px 14px;
+    font-weight: 700;
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #ffffff;
+    text-align: left;
+    border-bottom: 2px solid #4a8db8;
+}
+.md-table tbody td {
+    padding: 8px 14px;
+    border-bottom: 1px solid #e5e7eb;
+    vertical-align: top;
+    color: #1e1b4b;
+    line-height: 1.6;
+}
+.md-table tbody tr:nth-child(even) {
+    background: #f8fafc;
+}
+.md-table tbody tr:hover {
+    background: #eef6ff;
+}
+.md-table .word-clickable {
+    color: #1e1b4b;
+    cursor: pointer;
+    transition: color 0.2s, background 0.2s;
+}
+.md-table thead .word-clickable {
+    color: #ffffff;
+}
+.md-table .word-clickable:hover {
+    color: #7ec8e3;
+    background: rgba(126, 200, 227, 0.15);
+}
+
 .vocab-word { font-weight: 700; color: #1e1b4b; }
 .vocab-pos { color: #7ec8e3; font-weight: 600; font-size: 0.9rem; }
 .vocab-def { color: #333; }
