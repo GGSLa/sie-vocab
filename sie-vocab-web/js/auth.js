@@ -100,6 +100,10 @@ function _markBroken(name) {
 function createUtterance(text) {
     const u = new SpeechSynthesisUtterance(text);
     u.rate = 0.85;
+    // Chrome 中文 Win 上设 lang='en-US' 反而无声，所以仅 Windows 跳过
+    if (!/Windows/i.test(navigator.userAgent)) {
+        u.lang = 'en-US';
+    }
     return u;
 }
 
@@ -109,7 +113,7 @@ function safeSpeak(textOrUtterance) {
     // 尝试轮换语音
     const voice = _pickVoice();
     if (voice) u.voice = voice;
-    // 不设 lang — Chrome 中文 Win 上设了反而无声
+    // lang 在 createUtterance 中设为 'en-US'，仅 Windows 跳过（Chrome 中文 Win 设了反而无声）
 
     window._ttsCurrentUtterance = u;
 
