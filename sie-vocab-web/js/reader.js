@@ -1,4 +1,6 @@
 // SIE Reader — 整页阅读，跨页段落自动补齐
+const CALLOUT_CONT_MARKER = ''; // invisible protocol marker for callout continuation
+function isCalloutStart(s) { return s.startsWith('»') || s.startsWith(CALLOUT_CONT_MARKER); }
 let currentBookId = 1;
 let currentBookTitle = '';
 let currentPage = 67;
@@ -387,15 +389,33 @@ function formatText(text) {
         }
 
         // Group consecutive » (callout) blocks into a single <p>
-        if (trimmed.startsWith('»')) {
+        if (isCalloutStart(trimmed)) {
             let groupHTML = '';
             while (i < blocks.length) {
                 const b = blocks[i].trim();
-                if (!b || !b.startsWith('»')) break;
-                const safe = esc(b.replace(/^»\s*/, ''));
-                const clickable = safe.replace(/\b([a-zA-Z]+(?:'[a-zA-Z]+)?)\b/g,
-                    '<span class="word-clickable" data-word="$1" onclick="lookupWord(this)" title="点击查词">$1</span>');
-                groupHTML += '<span class="reader-callout-line">» ' + clickable + '</span>';
+                if (!b || !isCalloutStart(b)) break;
+                // Split callout blocks by \n for line-by-line rendering.
+                // This is essential for marker-prefixed blocks that span
+                // multiple lines (e.g. bullet lists within a callout).
+                const calloutLines = b.split('\n');
+                for (let li = 0; li < calloutLines.length; li++) {
+                    const cl = calloutLines[li].trim();
+                    if (!cl) continue;
+                    let safe, prefix;
+                    if (cl.startsWith('»')) {
+                        safe = esc(cl.replace(/^»\s*/, ''));
+                        prefix = '» ';
+                    } else if (cl.startsWith(CALLOUT_CONT_MARKER)) {
+                        safe = esc(cl.replace(CALLOUT_CONT_MARKER, ''));
+                        prefix = '';
+                    } else {
+                        safe = esc(cl);
+                        prefix = '';
+                    }
+                    const clickable = safe.replace(/\b([a-zA-Z]+(?:'[a-zA-Z]+)?)\b/g,
+                        '<span class="word-clickable" data-word="$1" onclick="lookupWord(this)" title="点击查词">$1</span>');
+                    groupHTML += '<span class="reader-callout-line">' + prefix + clickable + '</span>';
+                }
                 i++;
             }
             i--; // compensate for outer for loop increment
@@ -410,12 +430,19 @@ function formatText(text) {
             const lineTrimmed = line.trim();
             if (!lineTrimmed) return;
             const headingMatch = lineTrimmed.match(/^(#{1,3})\s+(.+)$/);
-            // Detect sidebar/callout lines (start with »)
-            if (lineTrimmed.startsWith('»') || lineTrimmed.startsWith('»')) {
-                const safe = esc(lineTrimmed.replace(/^»\s*/, ''));
+            // Detect sidebar/callout lines (start with » or invisible marker)
+            if (isCalloutStart(lineTrimmed)) {
+                let safe, prefix;
+                if (lineTrimmed.startsWith('»')) {
+                    safe = esc(lineTrimmed.replace(/^»\s*/, ''));
+                    prefix = '» ';
+                } else {
+                    safe = esc(lineTrimmed.replace(CALLOUT_CONT_MARKER, ''));
+                    prefix = '';
+                }
                 const clickable = safe.replace(/\b([a-zA-Z]+(?:'[a-zA-Z]+)?)\b/g,
                     '<span class="word-clickable" data-word="$1" onclick="lookupWord(this)" title="点击查词">$1</span>');
-                blockHTML += '<span class="reader-callout-line">» ' + clickable + '</span>';
+                blockHTML += '<span class="reader-callout-line">' + prefix + clickable + '</span>';
             }
             // Detect heading markers (#, ##, ###)
             else if (headingMatch) {

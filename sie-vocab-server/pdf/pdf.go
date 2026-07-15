@@ -12,6 +12,12 @@ import (
 	"time"
 )
 
+// calloutContMarker is a two-character invisible protocol marker using
+// Unicode Private Use Area codepoints (U+E000, U+E001). It marks callout
+// continuation paragraphs in the internal text pipeline without altering
+// visible text. The marker is stripped before the text reaches the AI.
+const calloutContMarker = ""
+
 // TocItem represents a single entry in the PDF outline (table of contents).
 type TocItem struct {
 	Level    int        `json:"level"`              // 0=part, 1=chapter, 2=section, 3=subsection
@@ -342,10 +348,11 @@ func detectBodyFontSize(lines []textLine, fontSizes map[int]int) int {
 
 // mergedLine is a pre-processed line ready for output.
 type mergedLine struct {
-	top     int
-	text    string
-	prefix  string // heading prefix: "# ", "## ", "### ", or ""
-	family  string // font family for callout/body detection
+	top      int
+	text     string
+	prefix   string // heading prefix: "# ", "## ", "### ", or ""
+	family   string // font family for callout/body detection
+	minLeft  int    // minimum left position of text elements in this line
 }
 
 // ---------- Table detection ----------
@@ -708,7 +715,7 @@ func buildStructuredText(lines []textLine, bodySize int) string {
 		if t, ok := tableByStart[i]; ok {
 			tableText := buildTableMarkdown(lines[t.startIdx:t.endIdx], t.columns)
 			if tableText != "" {
-				raw = append(raw, mergedLine{top: t.topY, text: tableText, prefix: "", family: ""})
+				raw = append(raw, mergedLine{top: t.topY, text: tableText, prefix: "", family: "", minLeft: t.columns[0].leftMin})
 				prevTop = t.topY
 			}
 			continue
@@ -717,6 +724,14 @@ func buildStructuredText(lines []textLine, bodySize int) string {
 		// Skip lines that belong to a table (already handled above)
 		if tableSkip[i] {
 			continue
+		}
+
+		// Compute minimum left position for this line (used for callout detection)
+		minLeft := 10000
+		for _, el := range line.elements {
+			if el.left < minLeft {
+				minLeft = el.left
+			}
 		}
 
 		// Build text from elements (do this first so we can classify before filtering)
@@ -767,11 +782,16 @@ func buildStructuredText(lines []textLine, bodySize int) string {
 		}
 		prevTop = line.top
 
-		raw = append(raw, mergedLine{top: line.top, text: text, prefix: prefix, family: line.family})
+		raw = append(raw, mergedLine{top: line.top, text: text, prefix: prefix, family: line.family, minLeft: minLeft})
 	}
 
 	// Phase 2: merge consecutive same-level headings and drop caps
 	merged := mergeRelatedLines(raw)
+
+	// Phase 2.5: detect callout continuation paragraphs (same indentation as callout
+	// content but without the » prefix) and prepend » to keep them grouped in the
+	// downstream text-based callout detection (processSegment).
+	markCalloutContinuations(merged, typGap)
 
 	// Phase 3: output with paragraph breaks.
 	// Uses dynamic thresholds derived from typical body line spacing:
@@ -797,6 +817,8 @@ func buildStructuredText(lines []textLine, bodySize int) string {
 				out.WriteByte('\n')
 			} else if vertGap > 30 && out.Len() > 0 {
 				out.WriteString("\n\n")
+			} else if out.Len() > 0 {
+				out.WriteByte('\n')
 			}
 			out.WriteString(ml.prefix)
 			out.WriteString(ml.text)
@@ -872,6 +894,65 @@ func mergeRelatedLines(raw []mergedLine) []mergedLine {
 	}
 
 	return out
+}
+
+// markCalloutContinuations detects paragraphs that belong to a » callout box
+// but lack the » prefix (e.g. second paragraph within the same shaded callout).
+// It uses the left indentation of callout content to identify continuations:
+// after a » line, subsequent lines at the same indentation that follow a paragraph
+// break (gap ≥ softBreakGap) are prefixed with » to keep them grouped.
+func markCalloutContinuations(merged []mergedLine, typGap int) {
+	softBreakGap := int(float64(typGap) * 1.3)
+	if softBreakGap < 18 {
+		softBreakGap = 18
+	}
+
+	inCallout := false
+	calloutLeft := 0
+	prevTop := -1000
+
+	for i := range merged {
+		ml := &merged[i]
+		gap := ml.top - prevTop
+
+		// Headings end any callout context
+		if ml.prefix != "" {
+			inCallout = false
+			prevTop = ml.top
+			continue
+		}
+
+		trimmed := strings.TrimSpace(ml.text)
+
+		// Callout start: line text starts with »
+		if strings.HasPrefix(trimmed, "»") {
+			inCallout = true
+			calloutLeft = 0 // will be captured from the next content line
+			prevTop = ml.top
+			continue
+		}
+
+		if inCallout {
+			if calloutLeft == 0 {
+				// First content line after the » marker — capture its left margin
+				calloutLeft = ml.minLeft
+			} else if ml.minLeft >= calloutLeft-5 {
+				// Same indentation as callout content — this is callout body.
+				// If there's a paragraph break, prepend » to mark this as a
+				// callout continuation (so processSegment handles it correctly).
+				if gap >= softBreakGap && !strings.HasPrefix(trimmed, "»") {
+					if !isListItem(trimmed) && !isTableLine(trimmed) && !isJustBulletMarker(trimmed) {
+						ml.text = calloutContMarker + ml.text
+					}
+				}
+			} else {
+				// Left margin changed — left the callout region
+				inCallout = false
+			}
+		}
+
+		prevTop = ml.top
+	}
 }
 
 // isDropCap returns true if the line looks like a drop cap:
@@ -1257,7 +1338,9 @@ func processSegment(text string) string {
 				continue
 			}
 
-			// Callout/sidebar lines: start new callout, merge continuation lines
+			// Callout/sidebar lines: start new callout, merge continuation lines.
+			// Lines starting with the invisible calloutContMarker (U+E000 U+E001)
+			// are callout continuations — strip the marker but treat as callout.
 			if isCalloutLine(line) {
 				if current != "" {
 					merged = append(merged, current)
@@ -1405,13 +1488,13 @@ func looksLikeHeading(block string) bool {
 // looksLikeCalloutOrList returns true if the block starts with a callout marker or list item.
 func looksLikeCalloutOrList(block string) bool {
 	firstLine := strings.TrimSpace(block)
-	return strings.HasPrefix(firstLine, "»") || isListItem(firstLine)
+	return isCalloutLine(firstLine) || isListItem(firstLine)
 }
 
 // looksLikeSpecialBlock returns true if the block is a heading, callout, or list item.
 func looksLikeSpecialBlock(block string) bool {
 	firstLine := strings.TrimSpace(block)
-	if strings.HasPrefix(firstLine, "#") || strings.HasPrefix(firstLine, "»") {
+	if strings.HasPrefix(firstLine, "#") || isCalloutLine(firstLine) {
 		return true
 	}
 	if isListItem(firstLine) {
@@ -1476,7 +1559,7 @@ func isHeadingLine(line string) bool {
 }
 
 func isCalloutLine(line string) bool {
-	return strings.HasPrefix(line, "»")
+	return strings.HasPrefix(line, "»") || strings.HasPrefix(line, calloutContMarker)
 }
 
 func isTableLine(line string) bool {
